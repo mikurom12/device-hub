@@ -265,6 +265,64 @@ pub const KNOWN: &[KnownDevice] = &[
         driver: DriverKind::Lamzu,
         verified: false,
     },
+    // ---------------------------------------------------------------- マウス (Logitech HID++ 2.0)
+    // PRO 2 LIGHTSPEED。VID/PID は Linux カーネル hid-logitech-hidpp / hid-logitech-dj の
+    // 追加パッチ (2025-08) から: 有線 0xC09A、LIGHTSPEED 受信機 0xC543。
+    // HID++ の long report (0x11) を運ぶ vendor 定義コレクションが usage page 0xFF00/usage 2
+    // か 0xFF43/0x0202 かは機種・世代で違うため、両方を候補に載せる (実機未確認 — 確定は
+    // `cargo run -p devhub-hid --example hidppprobe` の出力で行い、不要な行を消す)。
+    KnownDevice {
+        vid: 0x046D,
+        pid: 0xC09A,
+        usage_page: Some(0xFF00),
+        usage: Some(0x0002),
+        kind: DeviceKind::Mouse,
+        vendor: "Logitech G",
+        model: "pro2-lightspeed",
+        name: "PRO 2 LIGHTSPEED",
+        transport: Transport::Wired,
+        driver: DriverKind::Logitech,
+        verified: false,
+    },
+    KnownDevice {
+        vid: 0x046D,
+        pid: 0xC09A,
+        usage_page: Some(0xFF43),
+        usage: Some(0x0202),
+        kind: DeviceKind::Mouse,
+        vendor: "Logitech G",
+        model: "pro2-lightspeed",
+        name: "PRO 2 LIGHTSPEED",
+        transport: Transport::Wired,
+        driver: DriverKind::Logitech,
+        verified: false,
+    },
+    KnownDevice {
+        vid: 0x046D,
+        pid: 0xC543,
+        usage_page: Some(0xFF00),
+        usage: Some(0x0002),
+        kind: DeviceKind::Mouse,
+        vendor: "Logitech G",
+        model: "pro2-lightspeed",
+        name: "PRO 2 LIGHTSPEED",
+        transport: Transport::Wireless24G,
+        driver: DriverKind::Logitech,
+        verified: false,
+    },
+    KnownDevice {
+        vid: 0x046D,
+        pid: 0xC543,
+        usage_page: Some(0xFF43),
+        usage: Some(0x0202),
+        kind: DeviceKind::Mouse,
+        vendor: "Logitech G",
+        model: "pro2-lightspeed",
+        name: "PRO 2 LIGHTSPEED",
+        transport: Transport::Wireless24G,
+        driver: DriverKind::Logitech,
+        verified: false,
+    },
 ];
 
 /// 列挙結果 (VID/PID/usage) に合う既知デバイス。`0xFFFF` のプレースホルダは一致しない。

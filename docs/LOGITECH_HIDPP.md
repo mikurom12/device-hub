@@ -1,0 +1,81 @@
+# Logitech G (HID++ 2.0) — PRO 2 LIGHTSPEED
+
+G HUB 置換の第 1 段階。**実機 (PRO 2 LIGHTSPEED) での検証は未了**。この文書は
+「何が分かっていて、何が未確認か」を分けて書く。
+
+## 構成
+
+```
+crates/devhub-hidpp    HID++ 2.0 プロトコル (HID バックエンド非依存・単体テストあり)
+  src/lib.rs           フレーム・Session (swid 突き合わせ・エラーフレーム・機能 index 解決)・デバイス番号探索
+  src/features.rs      DPI / ポーリング / 電池 / FW / 名前 / オンボードモード
+crates/devhub-hid/src/logitech.rs   DeviceDriver 実装 (UI との橋渡し・再接続時の再適用)
+crates/devhub-hid/examples/hidppprobe.rs   読み取り専用の診断ツール
+```
+
+## 識別
+
+| 接続 | VID:PID | 出典 |
+|---|---|---|
+| 有線 | 046d:c09a | Linux カーネル `hid-logitech-hidpp.c` の PRO 2 LIGHTSPEED 追加パッチ (2025-08) |
+| LIGHTSPEED 受信機 | 046d:c543 | 同 `hid-logitech-dj.c` (`NANO_RECEIVER_LIGHTSPEED_1_2`) |
+
+HID++ の long report (0x11) を運ぶ vendor 定義コレクションの (usage page, usage) は
+**未確認**。registry には `FF00/0002` と `FF43/0202` の 2 候補を載せてある。
+`hidppprobe` で応答した方を残し、もう片方の行を消す。
+
+## 実装したプロトコル (出典: Solaar `hidpp20*.py` / `settings_templates.py`、libratbag `hidpp20.c`)
+
+フレーム: `[0x11, dev, feature_index, (function<<4)|swid, params…]` (20B)。応答は同じ
+`feature_index` と `(function<<4)|swid` をエコーする。エラーは `feature_index=0xFF` で
+`[0x11, dev, 0xFF, 失敗した feature_index, 失敗した func|swid, code]` (HID++ 1.0 は `0x8F`)。
+`dev` は有線直結なら `0xFF`、レシーバー経由ならペア番号 1..6 (`find_device_index` が ping で探す)。
+swid は `0x0D` (Solaar は `0x0B`)。
+
+| 機能 | ID | 使う関数 |
+|---|---|---|
+| Root | 0x0000 | f0 GetFeature(id)→index / f1 ping |
+| FeatureSet | 0x0001 | f0 count / f1 index→id |
+| DeviceFwVersion | 0x0003 | f0 count / f1 entry |
+| DeviceName | 0x0005 | f0 len / f1 chunk |
+| UnifiedBattery / BatteryVoltage / BatteryStatus | 0x1004 / 0x1001 / 0x1000 | 順に試す |
+| AdjustableDpi | 0x2201 | f1 list / f2 get / f3 set (リストは `0xE000\|step` + 上限の範囲表現あり) |
+| ReportRate | 0x8060 | f0 list(ms bitmask) / f1 get / f2 set |
+| ExtendedReportRate | 0x8061 | f1 list(bit i = 125Hz<<i) / f2 get / f3 set — **8K はこちら** |
+| OnboardProfiles | 0x8100 | f1 set mode / f2 get mode (1=Onboard, 2=Host) |
+
+## 現状の機能と制限
+
+できる: DPI (単一値)・ポーリングレート (8K 含む)・オンボード/ホスト切替・電池・FW 表示・
+再接続時に直近の DPI/レートを再適用 (`%APPDATA%\DeviceHub\logitech\046d_c09a.json`)。
+書込み後は必ず読み戻し、反映されなければ UI にエラーを出す (オンボードモードで無視される機器対策)。
+
+できない (実機のトレースが必要):
+
+- **DPI ステージ複数 / ボタン割り当て / マクロ**: オンボードプロファイル領域
+  (0x8100 の sector 読み書き・CRC-CCITT) の実装と、書込みが安全であることの実機確認が要る。
+  壊すと G HUB で復旧が必要になるため、トレース無しでは入れていない。
+- **ボタンのダイバート** (ReprogControlsV4 0x1B04): ホストモードでボタン機能を
+  ソフトで処理する場合に必要。入力の再注入 (SendInput) も要る。
+- **ライティング** (0x8071 RGB_EFFECTS / 0x8070)。
+- **ファームウェア更新**: 非対応。G HUB が唯一の経路。
+
+注意: ホストモードではマウス本体の DPI ボタン等の挙動がアプリ依存になる。既定は変更しない
+(UI の「設定の保持先」で切替)。
+
+## 実機での検証手順
+
+1. G HUB は起動したままでよい (HID++ は swid で多重化される)。ただし G HUB が同じ項目を
+   書き換えると競合するので、変更の検証は G HUB を止めてから行う。
+2. `cargo run -p devhub-hid --example hidppprobe` — 出力を保存 (これが最重要の一次資料)。
+   `HID++ 2.0 応答あり` が出た IF の (usage page, usage) が registry の正解。
+3. `cargo run --release -p device-hub` でマウスを選び、DPI とポーリングレートを変える。
+   反映は `hidppprobe` の `dpi now` / `rate now`、または polling 計測 (テスト画面) で確認。
+4. 問題なければ registry の `verified: true` と usage の確定、この文書の「未確認」を更新。
+5. その後 `scripts/switch-from-ghub.ps1` (既定はドライラン)。
+
+## G HUB の通信を取ってプロトコルを広げる
+
+USBPcap で G HUB の操作 (DPI ステージ変更・ボタン割り当て) を記録し、`0x11` で始まる
+OUT/IN をデコードする (`docs/capture.ps1`, `docs/USBPCAP_NATIVE_HANDOFF.md` 参照)。
+1 項目だけ変えて差分を見る方法は `docs/ADD_DEVICE.md` §2.3 と同じ。

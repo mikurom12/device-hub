@@ -1,0 +1,7 @@
+[package]
+name = "devhub-hidpp"
+version = "0.1.0"
+edition = "2021"
+description = "Logitech HID++ 2.0 protocol layer (no HID backend dependency). Used by devhub-hid's Logitech driver."
+
+[dependencies]

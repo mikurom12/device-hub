@@ -1226,10 +1226,15 @@ dependencies = [
  "base64 0.22.1",
  "cbc",
  "devhub-core",
+ "devhub-hidpp",
  "hidapi",
  "md-5",
  "serde_json",
 ]
+
+[[package]]
+name = "devhub-hidpp"
+version = "0.1.0"
 
 [[package]]
 name = "devhub-obs"

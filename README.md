@@ -56,6 +56,7 @@ No browser configurator or vendor application should be open at the same time: H
 | SU66 Max | Verified: keymap, lighting, per-key performance, polling, OS/debounce/sleep, configurations, advanced keys, macros, live travel, calibration |
 | ATK F1 V3 ULTIMATE+ — wired and dongle | Verified: firmware/battery, DPI/stage colors, polling, LOD, motion options, debounce, sleep, button keys, profiles, factory reset |
 | TP55 / WalkPlay USB DAC | Verified: parametric EQ read/write |
+| Logitech PRO 2 LIGHTSPEED — wired and receiver | **Unverified (not yet run on hardware).** HID++ 2.0 driver: DPI (single value), polling up to 8K, onboard/host mode, battery. See [docs/LOGITECH_HIDPP.md](docs/LOGITECH_HIDPP.md) |
 | LAMZU MAYA X V2 | Protocol implementation present; see [docs/LAMZU_MAYA_X_V2_AUDIT2.md](docs/LAMZU_MAYA_X_V2_AUDIT2.md). Some functions remain unverified or unsupported |
 
 Unsupported or partially supported devices may appear in demo/home lists; that does not mean every setting is verified.
@@ -92,6 +93,7 @@ Community forks already contain independent work on families such as Logitech HI
 |---|---|
 | `crates/devhub-core` | Device contract v2, keys, registry, demo backend |
 | `crates/devhub-hid` | Real HID drivers |
+| `crates/devhub-hidpp` | Logitech HID++ 2.0 protocol layer (HID-backend independent, unit-tested) |
 | `crates/devhub-polling` | USBPcap polling-rate measurement |
 | `crates/devhub-obs` | OBS source plugin (`devhub_obs.dll`) |
 | `crates/devhub-update` | Firmware/app update checks |

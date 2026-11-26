@@ -8,6 +8,7 @@ Windows 用の個人 GPUI アプリ。デザインは Liquid Glass。
 ```
 crates/devhub-core   契約 v2 (model / backend トレイト) + keys + registry + デモバックエンド   ← UI と HID の境界
 crates/devhub-hid    実機ドライバ (HID)                                                       ← バックエンド担当
+crates/devhub-hidpp  Logitech HID++ 2.0 プロトコル層 (hidapi 非依存・単体テスト可)
 crates/devhub-polling USBPcap 実測ポーリング計測器 (Target/Snapshot/Capture)                     ← アプリ・OBS 共通
 crates/device-hub    GPUI フロントエンド (Liquid Glass)                                         ← フロント担当
 vendor/              GPU backdrop を足した gpui-pre / gpui-pre-windows (GPU backdrop パッチ)
@@ -19,6 +20,7 @@ docs/LIVE_LIGHTING.md   ライブライティング (DirectDrive) とキーボ�
 docs/AUDIO_FRONTEND.md  USB DAC (TP55 / WalkPlay) の EQ 画面と契約の使い方
 docs/BACKEND_BRIEF.md   Web HUB 完全移植の機能表 (v3)
 docs/ADD_DEVICE.md      新デバイス追加の手順 (別セッション/別エージェント向け)
+docs/LOGITECH_HIDPP.md  Logitech PRO 2 LIGHTSPEED (HID++ 2.0) — 実装範囲・未検証事項・検証手順
 docs/PROTOCOL_NOTES.md  Web configurator の解析結果 (コマンド表・アドレス・機能一覧)
 docs/FRONTEND.md        フロントエンドの構造
 ```
