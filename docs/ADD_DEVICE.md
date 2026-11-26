@@ -3,6 +3,14 @@
 この手順は **別のセッション・別のエージェント・別の環境** でもそのまま使えるように、
 前提知識なしで読めるように書いてある。
 
+## はじめての人へ — 必要なものと最初の 30 分
+
+**必要なもの**: 対象デバイス、Windows PC、Rust (rust-toolchain.toml の版)、メーカーの WebHID 設定ツールまたは公式アプリ、できれば USBPcap / Wireshark。
+**最初に読むもの**: このファイルの §0–§2 と [PROTOCOL_NOTES.md](PROTOCOL_NOTES.md) の近いプロトコル。
+**最小の仕事**: registry に VID/PID/usage を 1 件足して検出させる → `Capabilities` だけ返す driver を作る → 読み取り 1 項目を実機で往復確認する。ここまでできたら Draft PR に早めに出してよい。
+
+安全の順序は固定です: **読み取り解析 → 読み取り実装 → 書き込み 1 項目の往復確認 → 残りの実装**。ファームウェア更新・DFU・ブートローダー系コマンドは扱いません。Web 版やベンダーアプリと同時に HID を開かないでください。解析元のライセンスと出どころは `THIRD_PARTY_NOTICES.md` に書きます。
+
 - UI (`crates/device-hub`) は**変更不要**。ドライバが `Capabilities` を返せば画面は自動で出る。
 - 作業場所は `crates/devhub-core/src/registry.rs` (1 行) と `crates/devhub-hid/src/<driver>/` (プロトコル)。
 
@@ -14,7 +22,8 @@
 | HTS Plus Pro (無線) | ドングル 33E4:3854 | FF02 / 02 | Mousefit → `mousefit8.rs` (report-8/EEPROM) | www.mouse.fit | **v2 実機検証済** (全設定・DPI・ボタン・マクロ・ポーリング 125–8K・磁気ボタン校正/押下深さ・休眠検知/覚醒自動再読) |
 | HTS Plus Pro (有線) | 33E4:5219 | FF02 / 02 | Mousefit → `mousefit8.rs` (report-8/EEPROM) | www.mouse.fit | **v2 実機検証済** (有線でも feature report は使えず report-8) |
 | HTX Ultra | 33E4:5608, 5617, 5618, 5619 | FF02 / 02 (推定) | Mousefit | www.mouse.fit | 機種表から登録 / 未検証 |
-| ATK F1 Ultimate | 未確定 | 未確定 | 未確定 | (mouse.fit の機種表に無い) | §7 を参照 |
+| ATK F1 V3 ULTIMATE+ | 実機依存 | 16B 中継 | `atk.rs` | ATK HUB | **有線+ドングル実機検証済** (AGENTS.md の現状を参照) |
+| LAMZU MAYA X V2 | 249b/実機依存 | feature report | `lamzu.rs` | LAMZU Aurora | プロトコル実装あり・一部未検証 (LAMZU_MAYA_X_V2_AUDIT2.md) |
 
 **接続方式でプロトコルが変わる点に注意**: mouse.fit の新プロトコル (64B feature report) は
 有線機種専用 — 8K ドングルは Windows の feature report を一切持たず、ドングル経由は
