@@ -1,6 +1,6 @@
 [package]
 name = "device-hub"
-version = "0.3.0"
+version = "0.4.0"
 edition.workspace = true
 license.workspace = true
 description = "Device HUB — ブラウザ無しでマウス/キーボードを設定する GPUI フロントエンド (Liquid Glass)"

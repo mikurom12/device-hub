@@ -1,17 +1,25 @@
-# Device HUB v0.3.0 の使い方（Windows x64）
+# Device HUB v0.4.0 の使い方（Windows x64）
 
 ## ダウンロードと起動
 
-[GitHub Release](https://github.com/pity-zxcv/device-hub/releases/tag/v0.3.0) の Assets から用途に合う ZIP を取得してください。
+[GitHub Release](https://github.com/pity-zxcv/device-hub/releases/tag/v0.4.0) の Assets から用途に合う ZIP を取得してください。
 
 | 用途 | ZIP | 展開先 |
 |---|---|---|
-| アプリと OBS プラグイン | `device-hub-v0.3.0-windows-x64.zip` | 任意のフォルダー |
-| OBS プラグインだけ | `devhub-obs-v0.3.0-plugin.zip` | `%ProgramData%\obs-studio\plugins\devhub_obs\` |
+| アプリと OBS プラグイン | `device-hub-v0.4.0-windows-x64.zip` | 任意のフォルダー |
+| OBS プラグインだけ | `devhub-obs-v0.4.0-plugin.zip` | `%ProgramData%\obs-studio\plugins\devhub_obs\` |
 
 ダウンロードの確認には PowerShell で `Get-FileHash .\ファイル名.zip -Algorithm SHA256` を実行し、同じリリースの `SHA256SUMS.txt` と照合します。
 
 アプリは ZIP を展開して `device-hub.exe` を起動します。設定したい機器を USB ケーブルまたは対応ドングルで接続し、メーカーの設定サイトを閉じてからホームで機器を選びます。選択した製品に応じて DPI、ボタン割り当て、キーボード、EQ などの設定が表示されます。
+
+## 見た目と常駐の設定
+
+- **デザイン** — 「アプリ設定」→「デザイン」で Liquid Glass と白黒の Frost Graphite を切り替えます。ライト / ダークはサイドバー下のボタンで切り替えます。
+- **トレイ常駐** — 「閉じたらトレイに常駐」をオンにすると、× でウィンドウを閉じてもタスクトレイに残ります。トレイのアイコンをクリックすると開き、右クリックで終了できます。常駐中は機器との接続を保つので、メーカーの設定サイトやアプリとは同時に使わないでください。
+- **Windows 起動時に開始** — オンにするとサインイン時に最小化で起動します。オフにすると登録は削除されます。
+- **更新の確認** — 「今すぐ確認」または 1 日 1 回の自動確認で、新しいリリースがあると知らせます。ダウンロードとインストールは手動です。
+- **アプリごとのプロファイル** — 「自動化」で、前面のアプリ (exe 名またはパス) ごとに機器のプリセットを割り当てられます。同じ内容は書き込まないため、機器の保存領域を無駄に消耗しません。
 
 ## ゲームを前面にしてマウスを計測する
 
