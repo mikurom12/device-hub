@@ -316,14 +316,19 @@ fn collect_dpi_list<I: Io>(
     skip: usize,
     params: impl Fn(u8) -> Vec<u8>,
 ) -> Result<DpiList> {
+    // 応答ごとの本体は奇数バイト (16-3=13 など) で、u16 が chunk の境目をまたぐ。
+    // 端数を捨てずに全 chunk を連結してから u16 に区切る (Solaar `produce_dpi_list` と同じ)。
+    // 実機 (PRO 2) では端数を捨てると 2 chunk 目以降が 1 バイトずれて値が壊れた。
     let mut bytes = Vec::new();
     for chunk in 0..8u8 {
         let p = s.call(feature, function, &params(chunk))?;
         let body = p.get(skip..).unwrap_or(&[]);
-        let even = body.len() & !1;
-        let before = bytes.len();
-        bytes.extend_from_slice(&body[..even]);
-        if body[..even].chunks_exact(2).any(|c| c == [0, 0]) || bytes.len() == before {
+        if body.is_empty() {
+            break;
+        }
+        bytes.extend_from_slice(body);
+        // 連結済みの u16 列に終端 (0x0000) が出たら終わり。
+        if bytes.chunks_exact(2).any(|c| c == [0, 0]) {
             break;
         }
     }
@@ -583,6 +588,30 @@ mod tests {
         set_dpi(&mut s, 0, 800).unwrap();
         // [sensor, X=800, Y=800, LOD=2 (現状維持)]
         assert_eq!(writes.lock().unwrap()[0], vec![0, 0x03, 0x20, 0x03, 0x20, 0x02]);
+    }
+
+    #[test]
+    fn extended_dpi_list_spanning_chunks_stays_aligned() {
+        // 実機で壊れた再現: u16 が chunk の境目 (13 バイト) をまたぐ長いリスト。
+        let words: [u16; 14] = [
+            100, 0xE001, 200, 0xE002, 500, 0xE005, 12000, 0xE064, 20000, 0xE07D, 32000, 0xE0C8,
+            44000, 0,
+        ];
+        let stream: Vec<u8> = words.iter().flat_map(|w| w.to_be_bytes()).collect();
+        let mut s = device(&[(EXTENDED_ADJUSTABLE_DPI, 11)], move |_, func, p| {
+            assert_eq!(func, 2);
+            let c = p[2] as usize;
+            let part = stream.get(c * 13..(c * 13 + 13).min(stream.len()))?;
+            let mut out = vec![0, 0, p[2]];
+            out.extend_from_slice(part);
+            Some(out)
+        });
+        let l = dpi_list(&mut s, 0).unwrap();
+        assert_eq!((l.min(), l.max()), (100, 44000));
+        assert_eq!(l.snap(823), 825); // 500→12000 は 5 刻み
+        assert_eq!(l.snap(12040), 12000); // 12000→20000 は 100 刻み
+        assert!(l.contains(20125) && !l.contains(20100)); // 20000→32000 は 125 刻み
+        assert_eq!(l.snap(60000), 44000);
     }
 
     #[test]
