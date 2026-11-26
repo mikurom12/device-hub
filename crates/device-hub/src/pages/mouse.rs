@@ -147,7 +147,10 @@ impl Shell {
                             .flex()
                             .items_end()
                             .gap(px(10.))
-                            .child(ui::big_number(format!("{}", shown.round() as u32), 64.))
+                            .child(ui::big_number(
+                                format!("{}", shown.round() as u32),
+                                if theme::is_graphite() { 104. } else { 64. },
+                            ))
                             .when(xy, |d| {
                                 d.child(
                                     div()
@@ -207,15 +210,57 @@ impl Shell {
                 18.,
             );
             let c = theme::rgb_of(s.color);
-            bars = bars.child(
+            let stage_col = if theme::is_graphite() {
+                // Frost Graphite: 高さは揃え、値に比例した部分だけを下から埋める。
+                let fill_h = ((s.x as f32 / maxv).clamp(0., 1.) * 150.).max(3.);
                 div()
-                    .id(SharedString::from(format!("stage-{i}")))
+                    .relative()
+                    .w(px(76.))
+                    .h(px(150.))
+                    .rounded(px(12.))
+                    .overflow_hidden()
+                    .bg(if on { p.inv } else { p.ctrl })
+                    .border_1()
+                    .border_color(if on { theme::alpha(p.edge, 0.) } else { p.hair })
+                    .child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .right_0()
+                            .bottom_0()
+                            .h(px(fill_h))
+                            .bg(if on { p.inv_fill } else { p.fill }),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(10.))
+                            .left(px(12.))
+                            .text_size(px(10.5))
+                            .text_color(if on {
+                                theme::alpha(p.inv_fg, 0.55)
+                            } else {
+                                p.faint
+                            })
+                            .child(format!("{:02}", i + 1)),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .bottom(px(10.))
+                            .left(px(12.))
+                            .text_size(px(20.))
+                            .font_weight(FontWeight::LIGHT)
+                            .text_color(if on { p.inv_fg } else { p.fg })
+                            .child(format!("{}", s.x)),
+                    )
+            } else {
+                div()
                     .w(px(64.))
                     .flex()
                     .flex_col()
                     .items_center()
                     .gap(px(6.))
-                    .cursor_pointer()
                     .child(
                         div()
                             .text_size(px(12.))
@@ -259,6 +304,11 @@ impl Shell {
                             })
                             .child(format!("{}", i + 1)),
                     )
+            };
+            bars = bars.child(
+                stage_col
+                    .id(SharedString::from(format!("stage-{i}")))
+                    .cursor_pointer()
                     .on_click(cx.listener(move |this, e: &ClickEvent, _, cx| {
                         this.dpi_sel = i;
                         this.dpi_sel_touch = true;
@@ -496,9 +546,36 @@ impl Shell {
                 .pt(px(6.))
                 .child(hero)
                 .child(bars)
-                .child(ui::faint(
-                    "クリックで編集 · ダブルクリックでそのステージに切り替え",
-                )),
+                .child({
+                    let kbd = |t: &'static str| {
+                        div()
+                            .h(px(18.))
+                            .px(px(5.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(5.))
+                            .border_1()
+                            .border_color(p.hair)
+                            .bg(p.ctrl)
+                            .text_size(px(10.5))
+                            .text_color(p.sub)
+                            .child(t)
+                    };
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .when(theme::is_graphite(), |d| {
+                            d.child(kbd("←"))
+                                .child(kbd("→"))
+                                .child(ui::faint("ステージ切替"))
+                                .child(ui::faint("·"))
+                        })
+                        .child(ui::faint(
+                            "クリックで編集 · ダブルクリックでそのステージに切り替え",
+                        ))
+                }),
         );
         let edit_card = ui::card_titled(
             &format!("ステージ {} の設定", sel + 1),

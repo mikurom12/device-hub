@@ -218,7 +218,6 @@ impl Shell {
             .unwrap_or_else(|| "—".into());
         let labels: Vec<String> = options.iter().map(|o| o.label.clone()).collect();
         let sel = cur.and_then(|c| options.iter().position(|o| o.value == c));
-        let (sp2, opts) = (sp.clone(), options.clone());
         // 実測 (Raw Input)。USB 計測中は同じスナップショットを計測元つきで併記する。
         let live = self.cur().and_then(|s| s.poll.as_ref()).map(|st| {
             let v = st.peak_hz.or(st.seg_hz).unwrap_or(st.hz);
@@ -249,6 +248,73 @@ impl Shell {
             }
             None => live,
         };
+        let selector = if theme::is_graphite() {
+            // Frost Graphite: ポーリングレートは低→高の階段。選択だけ反転する。
+            let mut bars = div().flex().items_end().gap(px(8.)).w_full();
+            let n = options.len().max(1) as f32;
+            for (i, o) in options.iter().enumerate() {
+                let on = Some(i) == sel;
+                let before = sel.is_some_and(|s| i < s);
+                let h = 24. + if n > 1. { i as f32 / (n - 1.) } else { 0. } * 56.;
+                let sp2 = sp.clone();
+                let v = o.value;
+                bars = bars.child(
+                    div()
+                        .id(SharedString::from(format!("poll-{}-{}", sp.id, o.value)))
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap(px(8.))
+                        .cursor_pointer()
+                        .child(
+                            div()
+                                .w_full()
+                                .h(px(h))
+                                .rounded(px(8.))
+                                .bg(if on {
+                                    p.inv
+                                } else if before {
+                                    p.fill
+                                } else {
+                                    p.ctrl
+                                })
+                                .border_1()
+                                .border_color(if on { theme::alpha(p.edge, 0.) } else { p.hair }),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(11.5))
+                                .font_weight(if on {
+                                    FontWeight::SEMIBOLD
+                                } else {
+                                    FontWeight::NORMAL
+                                })
+                                .text_color(if on { p.fg } else { p.sub })
+                                .child(o.label.clone()),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if !on {
+                                this.send_setting(&sp2, SettingValue::Choice(v), cx);
+                            }
+                        })),
+                );
+            }
+            bars
+        } else {
+            let (sp2, opts) = (sp.clone(), options.clone());
+            ui::segmented(
+                &format!("hero-{}", sp.id),
+                &labels,
+                sel.unwrap_or(usize::MAX),
+                cx,
+                move |this, i, cx| {
+                    if Some(i) != sel {
+                        this.send_setting(&sp2, SettingValue::Choice(opts[i].value), cx);
+                    }
+                },
+            )
+        };
         let body = div()
             .flex()
             .flex_col()
@@ -263,17 +329,7 @@ impl Shell {
                     .child(div().flex_1())
                     .when_some(live, |d, l| d.child(ui::faint(l))),
             )
-            .child(ui::segmented(
-                &format!("hero-{}", sp.id),
-                &labels,
-                sel.unwrap_or(usize::MAX),
-                cx,
-                move |this, i, cx| {
-                    if Some(i) != sel {
-                        this.send_setting(&sp2, SettingValue::Choice(opts[i].value), cx);
-                    }
-                },
-            ))
+            .child(selector)
             .child(div().text_size(px(11.)).text_color(p.faint).child(
                 sp.help.clone().unwrap_or_default(),
             ));
@@ -439,7 +495,11 @@ impl Shell {
         let dis = enabled(sp, st).err();
         let sp2 = sp.clone();
         let icon = tile_icon(&sp.id);
-        let k = motion::ease(&format!("tile:{}", sp.id), on == Some(true));
+        let k = if theme::is_graphite() {
+            if on == Some(true) { 1. } else { 0. }
+        } else {
+            motion::ease(&format!("tile:{}", sp.id), on == Some(true))
+        };
         div()
             .id(ElementId::Name(format!("tile-{}", sp.id).into()))
             .flex_1()

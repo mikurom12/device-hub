@@ -18,6 +18,7 @@ pub enum PalAction {
     Undo,
     Redo,
     Theme(bool),
+    ThemeFamily(&'static str),
 }
 
 #[derive(Clone)]
@@ -155,6 +156,14 @@ impl Shell {
             "sun",
             PalAction::Theme(true),
         ));
+        for (id, name) in theme::THEME_FAMILIES {
+            v.push(it(
+                format!("{name} デザイン"),
+                "見た目",
+                "palette",
+                PalAction::ThemeFamily(id),
+            ));
+        }
         v
     }
 
@@ -209,6 +218,7 @@ impl Shell {
             PalAction::Undo => self.undo(cx),
             PalAction::Redo => self.redo(cx),
             PalAction::Theme(l) => self.set_light(l, cx),
+            PalAction::ThemeFamily(id) => self.set_theme_family(id, cx),
         }
         cx.notify();
     }

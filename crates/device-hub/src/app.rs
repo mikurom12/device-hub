@@ -389,6 +389,17 @@ pub struct Shell {
     pub auto_form: crate::pages::auto::AutoForm,
 
     toast_timer: bool,
+    /// 壁紙クロスフェード用の現在/前の画像。
+    wall_cur: Option<std::sync::Arc<gpui::RenderImage>>,
+    wall_prev: Option<std::sync::Arc<gpui::RenderImage>>,
+    /// オーバーレイ入場を最後に開始したか。
+    modal_anim_open: bool,
+    popup_anim_open: bool,
+    /// フェードアウト中のオーバーレイ。完了タイマーは seq で無効化する。
+    pub(crate) modal_closing: bool,
+    pub(crate) popup_closing: bool,
+    modal_close_seq: u64,
+    popup_close_seq: u64,
     /// 自窓の HWND — 最小化/背面中にワーキングセットを OS へ返すために使う。
     #[cfg(windows)]
     hwnd: isize,
@@ -460,6 +471,7 @@ impl Shell {
         let prefs = Prefs::load();
         let startup_device = prefs.last_device.clone().map(DeviceId);
         theme::set_light(prefs.light());
+        theme::set_theme_family_id(&prefs.theme_family);
         theme::set_accent(prefs.accent);
         theme::set_font_id(&prefs.font);
         theme::set_glass(prefs.glass && std::env::var_os("DEVHUB_FAST").is_none());
@@ -668,6 +680,14 @@ impl Shell {
             proc_retry: Default::default(),
             auto_form: Default::default(),
             toast_timer: false,
+            wall_cur: None,
+            wall_prev: None,
+            modal_anim_open: false,
+            popup_anim_open: false,
+            modal_closing: false,
+            popup_closing: false,
+            modal_close_seq: 0,
+            popup_close_seq: 0,
             #[cfg(windows)]
             hwnd: window_hwnd(window),
             #[cfg(windows)]
@@ -734,6 +754,56 @@ impl Shell {
     }
 
     // ------------------------------------------------------------------ 共通操作
+
+    /// ポップアップを presence の退出時間だけ残してから閉じる。
+    pub fn close_popup(&mut self, cx: &mut Context<Self>) {
+        if self.popup.is_none() || self.popup_closing {
+            return;
+        }
+        self.popup_closing = true;
+        self.popup_close_seq += 1;
+        let seq = self.popup_close_seq;
+        cx.spawn(async move |this: WeakEntity<Shell>, cx: &mut AsyncApp| {
+            cx.background_executor()
+                .timer(Duration::from_millis(motion::DUR_MENU_OUT as u64 + 30))
+                .await;
+            this.update(cx, |this, cx| {
+                if this.popup_close_seq == seq {
+                    this.popup = None;
+                    this.popup_closing = false;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// モーダルを presence の退出時間だけ残してから閉じる。
+    pub fn close_modal(&mut self, cx: &mut Context<Self>) {
+        if self.modal.is_none() || self.modal_closing {
+            return;
+        }
+        self.modal_closing = true;
+        self.modal_close_seq += 1;
+        let seq = self.modal_close_seq;
+        cx.spawn(async move |this: WeakEntity<Shell>, cx: &mut AsyncApp| {
+            cx.background_executor()
+                .timer(Duration::from_millis(motion::DUR_DIALOG_OUT as u64 + 30))
+                .await;
+            this.update(cx, |this, cx| {
+                if this.modal_close_seq == seq {
+                    this.modal = None;
+                    this.modal_closing = false;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
 
     pub fn toast(&mut self, msg: impl Into<String>, error: bool, cx: &mut Context<Self>) {
         self.toasts.push(Toast {
@@ -1063,6 +1133,8 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         let anchor = motion::rect(anchor_id).unwrap_or([200., 200., 160., 32.]);
+        self.popup_closing = false;
+        self.popup_close_seq += 1;
         self.popup = Some(Popup {
             anchor,
             items,
@@ -1270,7 +1342,43 @@ impl Shell {
         cx.notify();
     }
 
+    /// テーマ系統 (Liquid Glass / Frost Graphite) を切り替える。明暗は `theme` のまま共有する。
+    pub fn set_theme_family(&mut self, id: &str, cx: &mut Context<Self>) {
+        theme::set_theme_family_id(id);
+        self.prefs.theme_family = theme::theme_family_id().into();
+        self.prefs.save();
+        clear_component_chrome(cx);
+        cx.notify();
+    }
+
     // ------------------------------------------------------------------ キー入力
+
+    /// DPI タブで ←/→ による編集ステージ移動。使用中ステージは変えず、編集対象だけを動かす。
+    fn dpi_key_sel(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let Some(len) = self.cur().and_then(|s| {
+            s.state
+                .as_ref()?
+                .mouse
+                .as_ref()
+                .map(|m| m.stages.len())
+        }) else {
+            return;
+        };
+        if len == 0 {
+            return;
+        }
+        let cur = self.dpi_sel.min(len - 1);
+        let next = if delta < 0 {
+            cur.saturating_sub(1)
+        } else {
+            (cur + 1).min(len - 1)
+        };
+        if next != cur {
+            self.dpi_sel = next;
+            self.dpi_sel_touch = true;
+            cx.notify();
+        }
+    }
 
     fn on_key_down(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         // ボタン割り当て中のキー取り込み。
@@ -1337,6 +1445,18 @@ impl Shell {
             "z" if m.control && !m.shift && root_focused && self.modal.is_none() => self.undo(cx),
             "y" if m.control && root_focused && self.modal.is_none() => self.redo(cx),
             "z" if m.control && m.shift && root_focused && self.modal.is_none() => self.redo(cx),
+            "left" | "right"
+                if root_focused
+                    && self.modal.is_none()
+                    && self.popup.is_none()
+                    && self.tab == Tab::Dpi
+                    && matches!(self.route, Route::Device(_))
+                    && !m.control
+                    && !m.alt
+                    && !m.platform =>
+            {
+                self.dpi_key_sel(if e.keystroke.key == "left" { -1 } else { 1 }, cx);
+            }
             "a" if e.keystroke.modifiers.control && self.modal.is_none() => {
                 if let Some(n) = self.keyboard_len() {
                     if matches!(self.tab, Tab::Trigger | Tab::Lighting) {
@@ -1498,15 +1618,18 @@ impl Shell {
             .flex_none()
             .flex()
             .flex_col()
-            .rounded(px(26.))
+            .rounded(px(if theme::is_graphite() { 16. } else { 26. }))
             .shadow(vec![BoxShadow {
                 color: p.shadow,
-                offset: point(px(0.), px(14.)),
-                blur_radius: px(40.),
-                spread_radius: px(-10.),
+                offset: point(px(0.), px(if theme::is_graphite() { 24. } else { 14. })),
+                blur_radius: px(if theme::is_graphite() { 48. } else { 40. }),
+                spread_radius: px(if theme::is_graphite() { -18. } else { -10. }),
                 inset: false,
             }])
-            .child(glass::surface(glass::Kind::Clear, 26.))
+            .child(glass::surface(
+                glass::Kind::Clear,
+                if theme::is_graphite() { 16. } else { 26. },
+            ))
             .child(
                 div()
                     .relative()
@@ -1533,7 +1656,11 @@ impl Shell {
                                     .items_center()
                                     .justify_center()
                                     .shadow(vec![BoxShadow {
-                                        color: theme::alpha(p.accent, 0.45),
+                                        color: if theme::is_graphite() {
+                                            theme::alpha(p.shadow, 0.35)
+                                        } else {
+                                            theme::alpha(p.accent, 0.45)
+                                        },
                                         offset: point(px(0.), px(6.)),
                                         blur_radius: px(16.),
                                         spread_radius: px(-4.),
@@ -1611,7 +1738,7 @@ impl Shell {
                             .id("side-scroll")
                             .flex_1()
                             .min_h_0()
-                            .overflow_y_scroll()
+                            .overflow_y_scroll().smooth_wheel()
                             .child(list),
                     )
                     .child(div().h(px(1.)).mx(px(8.)).my(px(8.)).bg(p.hair))
@@ -1653,7 +1780,10 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let p = theme::pal();
-        let k = motion::ease(&format!("nav:{id}"), sel);
+        let k = if sel { 1. } else { 0. };
+        let hkey = format!("navh:{id}");
+        let (hover_e, press_e) = motion::feel(&hkey);
+        let touch = (hover_e * 0.8 + press_e * 0.2).min(1.);
         div()
             .id(SharedString::from(format!("nav-{id}")))
             .relative()
@@ -1664,19 +1794,50 @@ impl Shell {
             .gap(px(10.))
             .rounded(px(12.))
             .cursor_pointer()
-            .hover(|s| s.bg(p.ctrl))
+            .bg(theme::alpha(p.ctrl, p.ctrl.a * touch))
+            .child(motion::track(hkey))
             .when(k > 0.01, |d| {
+                let graphite = theme::is_graphite();
                 d.child(
                     div()
                         .absolute()
                         .inset_0()
-                        .rounded(px(12.))
-                        .bg(theme::alpha(p.accent, 0.18 * k))
+                        .rounded(px(if graphite { 10. } else { 12. }))
+                        .bg(if graphite {
+                            theme::alpha(p.sel, p.sel.a * k)
+                        } else {
+                            theme::alpha(p.accent, 0.18 * k)
+                        })
                         .border_1()
-                        .border_color(theme::alpha(p.accent, 0.28 * k)),
+                        .border_color(if graphite {
+                            theme::alpha(p.edge, 0.)
+                        } else {
+                            theme::alpha(p.accent, 0.28 * k)
+                        })
+                        .when(graphite, |d| {
+                            d.shadow(vec![BoxShadow {
+                                color: theme::alpha(p.sel_shadow, p.sel_shadow.a * k),
+                                offset: point(px(0.), px(if p.light { 1. } else { 0. })),
+                                blur_radius: px(if p.light { 8. } else { 0. }),
+                                spread_radius: px(0.),
+                                inset: !p.light,
+                            }])
+                        }),
                 )
             })
-            .child(ui::icon(icon, 16., if sel { p.accent } else { p.sub }))
+            .child(ui::icon(
+                icon,
+                16.,
+                if sel {
+                    if theme::is_graphite() {
+                        p.fg
+                    } else {
+                        p.accent
+                    }
+                } else {
+                    p.sub
+                },
+            ))
             .child(
                 div()
                     .text_size(px(13.))
@@ -1698,7 +1859,7 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let p = theme::pal();
-        let k = motion::ease(&format!("dev:{}", d.id), sel);
+        let k = if sel { 1. } else { 0. };
         let id = d.id.clone();
         let name = self
             .prefs
@@ -1729,6 +1890,9 @@ impl Shell {
             .session(&d.id)
             .map(|s| s.pending > 0)
             .unwrap_or(false);
+        let hkey = format!("devh:{}", d.id);
+        let (hover_e, press_e) = motion::feel(&hkey);
+        let touch = (hover_e * 0.8 + press_e * 0.2).min(1.);
         div()
             .id(SharedString::from(format!("dev-{}", d.id)))
             .relative()
@@ -1739,16 +1903,26 @@ impl Shell {
             .gap(px(10.))
             .rounded(px(14.))
             .cursor_pointer()
-            .hover(|s| s.bg(p.ctrl))
+            .bg(theme::alpha(p.ctrl, p.ctrl.a * touch))
+            .child(motion::track(hkey))
             .when(k > 0.01, |dv| {
+                let graphite = theme::is_graphite();
                 dv.child(
                     div()
                         .absolute()
                         .inset_0()
-                        .rounded(px(14.))
-                        .bg(theme::alpha(p.accent, 0.16 * k))
+                        .rounded(px(if graphite { 12. } else { 14. }))
+                        .bg(if graphite {
+                            theme::alpha(p.sel, p.sel.a * k)
+                        } else {
+                            theme::alpha(p.accent, 0.16 * k)
+                        })
                         .border_1()
-                        .border_color(theme::alpha(p.accent, 0.3 * k)),
+                        .border_color(if graphite {
+                            theme::alpha(p.edge, 0.)
+                        } else {
+                            theme::alpha(p.accent, 0.3 * k)
+                        }),
                 )
             })
             .child(
@@ -1758,14 +1932,32 @@ impl Shell {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .bg(if d.supported {
+                    .bg(if sel && theme::is_graphite() {
+                        p.inv
+                    } else if d.supported {
                         p.ctrl
                     } else {
                         theme::alpha(p.warn, 0.12)
                     })
                     .border_1()
-                    .border_color(p.hair)
-                    .child(ui::icon(icon, 17., if sel { p.accent } else { p.fg })),
+                    .border_color(if sel && theme::is_graphite() {
+                        theme::alpha(p.edge, 0.)
+                    } else {
+                        p.hair
+                    })
+                    .child(ui::icon(
+                        icon,
+                        17.,
+                        if sel {
+                            if theme::is_graphite() {
+                                p.inv_fg
+                            } else {
+                                p.accent
+                            }
+                        } else {
+                            p.fg
+                        },
+                    )),
             )
             .child(
                 div()
@@ -1846,7 +2038,16 @@ impl Shell {
                 .items_center()
                 .justify_center()
                 .cursor_pointer()
-                .when(on, |d| d.bg(p.ctrl_hover).border_1().border_color(p.edge))
+                .when(on, |d| {
+                    if theme::is_graphite() {
+                        d.bg(p.chip_bg)
+                            .border_1()
+                            .border_color(theme::alpha(p.edge, 0.))
+                            .shadow(theme::chip_shadows(p))
+                    } else {
+                        d.bg(p.ctrl_hover).border_1().border_color(p.edge)
+                    }
+                })
                 .child(ui::icon(icon, 15., if on { p.fg } else { p.faint }))
                 .on_click(
                     cx.listener(move |this, _, _, cx| this.set_light(id == "theme-light", cx)),
@@ -1886,12 +2087,30 @@ pub fn clear_component_chrome(cx: &mut App) {
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         motion::begin_frame();
+        glass::begin_frame();
+        gpui_kit::set_smooth_wheel(theme::motion_on());
         let p = theme::pal();
         let active = window.is_window_active();
         if active != self.last_window_active {
             self.last_window_active = active;
         }
         let wall = wallpaper::current(self.prefs.wallpaper.as_deref());
+        if self
+            .wall_cur
+            .as_ref()
+            .is_none_or(|old| !std::sync::Arc::ptr_eq(old, &wall))
+        {
+            self.wall_prev = self.wall_cur.replace(wall.clone());
+            motion::restart("wallpaper:fade", 0.);
+        }
+        let wall_k = if self.wall_prev.is_some() {
+            motion::at("wallpaper:fade", 1., motion::DUR_ENTER, motion::EASE_OUT)
+        } else {
+            1.
+        };
+        if wall_k >= 0.999 {
+            self.wall_prev = None;
+        }
         let content = self.content(window, cx);
         let sidebar = self.sidebar(cx).into_any_element();
 
@@ -1908,7 +2127,10 @@ impl Render for Shell {
                 cx.listener(|this, e: &ModifiersChangedEvent, _, cx| this.on_modifiers(e, cx)),
             )
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
-                motion::set_pointer(f32::from(e.position.x), f32::from(e.position.y));
+                let (x, y) = (f32::from(e.position.x), f32::from(e.position.y));
+                if motion::pointer_moved(x, y) {
+                    cx.notify();
+                }
                 if this.drag.is_some() {
                     this.drag_to(e.position, cx);
                 }
@@ -1943,7 +2165,16 @@ impl Render for Shell {
                     .absolute()
                     .inset_0()
                     .bg(p.solid)
-                    .child(img(wall).size_full().object_fit(ObjectFit::Cover)),
+                    .when_some(self.wall_prev.clone(), |d, prev| {
+                        d.child(img(prev).size_full().object_fit(ObjectFit::Cover))
+                    })
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .opacity(wall_k)
+                            .child(img(wall).size_full().object_fit(ObjectFit::Cover)),
+                    ),
             )
             // サイドバー | 本文
             .child(
@@ -1955,7 +2186,14 @@ impl Render for Shell {
                     .p(px(12.))
                     .gap(px(12.))
                     .child(sidebar)
-                    .child(div().flex_1().min_w_0().h_full().relative().child(content)),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .relative()
+                            .child(content),
+                    ),
             )
             // タイトルバー (透明・ドラッグ可能・右端に窓ボタン)
             .child(
@@ -1967,6 +2205,14 @@ impl Render for Shell {
                 ),
             );
 
+        if self.modal.is_some() && !self.modal_closing && !self.modal_anim_open {
+            motion::restart("v:modal", 0.);
+        }
+        self.modal_anim_open = self.modal.is_some();
+        if self.popup.is_some() && !self.popup_closing && !self.popup_anim_open {
+            motion::restart("v:popup", 0.);
+        }
+        self.popup_anim_open = self.popup.is_some();
         if let Some(m) = self.modal_layer(window, cx) {
             root = root.child(m);
         }
@@ -2012,9 +2258,9 @@ impl Shell {
     fn mem_tick(&mut self) {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::System::Threading::{
-            GetCurrentProcess, SetProcessInformation, SetProcessWorkingSetSize,
-            MEMORY_PRIORITY_BELOW_NORMAL, MEMORY_PRIORITY_INFORMATION, MEMORY_PRIORITY_NORMAL,
-            ProcessMemoryPriority,
+            GetCurrentProcess, ProcessMemoryPriority, SetProcessInformation,
+            SetProcessWorkingSetSize, MEMORY_PRIORITY_BELOW_NORMAL, MEMORY_PRIORITY_INFORMATION,
+            MEMORY_PRIORITY_NORMAL,
         };
         use windows::Win32::UI::WindowsAndMessaging::IsIconic;
         if self.hwnd == 0 {
@@ -2066,9 +2312,13 @@ impl Shell {
     fn mem_tick(&mut self) {}
 
     fn usb_resolve_target(&mut self) -> bool {
-        if self.prefs.usb_pick.is_empty() { return true; }
+        if self.prefs.usb_pick.is_empty() {
+            return true;
+        }
         let Some(d) = devhub_polling::discover::resolve(&self.prefs.usb_pick, 0, 0) else {
-            self.usb_scan_msg = Some("対象が見つかりません。接続を確認して更新し、製品を選び直してください。".into());
+            self.usb_scan_msg = Some(
+                "対象が見つかりません。接続を確認して更新し、製品を選び直してください。".into(),
+            );
             return false;
         };
         self.usb_target.hub = d.hub;
@@ -2085,7 +2335,9 @@ impl Shell {
         };
         self.usb_snap = None;
         self.usb_result = None;
-        if !self.usb_resolve_target() { return; }
+        if !self.usb_resolve_target() {
+            return;
+        }
         self.usb_cap = Some((id, devhub_polling::Capture::start(self.usb_target)));
     }
 
@@ -2117,10 +2369,7 @@ impl Shell {
                 Ok((hub, dev, result)) => {
                     self.usb_scan = None;
                     self.usb_scan_msg = Some(match result {
-                        Ok(eps)
-                            if hub == self.usb_target.hub
-                                && dev == self.usb_target.device =>
-                        {
+                        Ok(eps) if hub == self.usb_target.hub && dev == self.usb_target.device => {
                             match eps.first() {
                                 Some((ep, n)) => {
                                     self.usb_target.endpoint = *ep;
@@ -2128,9 +2377,7 @@ impl Shell {
                                     self.prefs.save();
                                     format!("EP 0x{ep:02X} を検出 ({n} 転送) — 計測を開始できます")
                                 }
-                                None => {
-                                    "転送なし — 対象デバイスを操作しながら再試行".to_string()
-                                }
+                                None => "転送なし — 対象デバイスを操作しながら再試行".to_string(),
                             }
                         }
                         Ok(_) => "対象が変わったため検出結果を破棄しました".to_string(),

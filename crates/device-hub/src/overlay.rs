@@ -21,7 +21,12 @@ impl Shell {
     pub fn popup_layer(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let pop = self.popup.as_ref()?;
         let p = theme::pal();
-        let k = motion::spring_with("popup-in", 1., 26.);
+        let k = motion::presence(
+            "popup",
+            !self.popup_closing,
+            motion::DUR_MENU_IN,
+            motion::DUR_MENU_OUT,
+        );
         let [ax, ay, aw, ah] = pop.anchor;
         let w = aw.max(pop.min_w).max(160.);
         let items = pop.items.clone();
@@ -70,8 +75,10 @@ impl Shell {
                     .when_some(it.sub.clone(), |d, s| d.child(ui::faint(s)))
                     .when(sel, |d| d.child(ui::icon("check", 14., p.accent)))
                     .on_click(cx.listener(move |this, _, w, cx| {
-                        if let Some(pop) = this.popup.take() {
-                            (pop.on_pick)(this, i, w, cx);
+                        let pick = this.popup.as_ref().map(|pop| pop.on_pick.clone());
+                        this.close_popup(cx);
+                        if let Some(on_pick) = pick {
+                            on_pick(this, i, w, cx);
                         }
                         cx.notify();
                     })),
@@ -85,8 +92,7 @@ impl Shell {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _, _, cx| {
-                        this.popup = None;
-                        cx.notify();
+                        this.close_popup(cx);
                     }),
                 )
                 .child(
@@ -94,7 +100,7 @@ impl Shell {
                         .id("popup")
                         .absolute()
                         .left(px(ax))
-                        .top(px(top + (1. - k) * if below { -6. } else { 6. }))
+                        .top(px(top + (1. - k) * if below { -2. } else { 2. }))
                         .w(px(w))
                         .max_h(px(380.))
                         .opacity(k)
@@ -113,7 +119,7 @@ impl Shell {
                                 .id("popup-list")
                                 .relative()
                                 .max_h(px(380.))
-                                .overflow_y_scroll()
+                                .overflow_y_scroll().smooth_wheel()
                                 .child(list),
                         ),
                 )
@@ -137,7 +143,13 @@ impl Shell {
             .items_end()
             .gap(px(8.));
         for (i, t) in self.toasts.iter().enumerate() {
-            let k = motion::spring_with(&format!("toast:{:?}", t.born), 1., 22.);
+            let present = t.born.elapsed().as_millis() < 4000;
+            let k = motion::presence(
+                &format!("toast:{:?}", t.born),
+                present,
+                motion::DUR_MENU_IN,
+                motion::DUR_MENU_OUT,
+            );
             let c = if t.error { p.danger } else { p.ok };
             col = col.child(
                 div()
@@ -150,7 +162,7 @@ impl Shell {
                     .gap(px(10.))
                     .rounded(px(14.))
                     .opacity(k)
-                    .ml(px((1. - k) * 30.))
+                    .ml(px((1. - k) * 8.))
                     .shadow(vec![BoxShadow {
                         color: p.shadow,
                         offset: point(px(0.), px(10.)),
@@ -190,7 +202,12 @@ impl Shell {
     ) -> Option<AnyElement> {
         self.modal.as_ref()?;
         let p = theme::pal();
-        let k = motion::spring_with("modal-in", 1., 24.);
+        let k = motion::presence(
+            "modal",
+            !self.modal_closing,
+            motion::DUR_DIALOG_IN,
+            motion::DUR_DIALOG_OUT,
+        );
         let (title, body, width): (String, AnyElement, f32) = match self.modal.as_ref()? {
             Modal::Confirm { title, .. } => (title.clone(), self.modal_confirm(cx), 420.),
             Modal::Button { slot, .. } => {
@@ -230,8 +247,7 @@ impl Shell {
                     MouseButton::Left,
                     cx.listener(|this, _, _, cx| {
                         if this.popup.is_none() {
-                            this.modal = None;
-                            cx.notify();
+                            this.close_modal(cx);
                         }
                     }),
                 )
@@ -241,7 +257,7 @@ impl Shell {
                         .relative()
                         .w(px(width))
                         .max_h(relative(0.9))
-                        .mt(px((1. - k) * 24.))
+                        .mt(px((1. - k) * 6.))
                         .opacity(k)
                         .rounded(px(24.))
                         .shadow(vec![BoxShadow {
@@ -276,8 +292,7 @@ impl Shell {
                                             "x",
                                             cx,
                                             |this, _, cx| {
-                                                this.modal = None;
-                                                cx.notify();
+                                                this.close_modal(cx);
                                             },
                                         )),
                                 )
@@ -307,8 +322,7 @@ impl Shell {
                 Btn::Ghost,
                 cx,
                 |this, _, cx| {
-                    this.modal = None;
-                    cx.notify();
+                    this.close_modal(cx);
                 },
             ))
             .child(ui::button(

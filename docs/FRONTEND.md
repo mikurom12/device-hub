@@ -7,10 +7,10 @@ src/
   store.rs       Hub / Session: デバイスごとのワーカースレッド、楽観的反映 (apply_local)、futures channel で結果受信
   overlay.rs     ポップアップメニュー・モーダル (確認 / ボタン割り当て / キー取り込み / 色 / テキスト)・トースト
   ui.rs          部品: card / row / toggle / slider(_curve) / segmented / select / stepper / tab_bar / button / chip
-  glass.rs       Liquid Glass の面 (Panel / Clear / Frost / Sheet) と泡レンズ
-  motion.rs      臨界減衰ばね・要素矩形の記録 (track / rect / hovered)。動いている間だけ次フレーム要求
-  theme.rs       配色 (ダーク/ライト・アクセント 6 色)・フォント
-  wallpaper.rs   オーロラ壁紙の生成 / ユーザー画像
+  glass.rs       ガラス面 (Panel / Clear / Frost / Sheet)。Liquid Glass の泡レンズと Frost Graphite の粒子
+  motion.rs      実時間補間 (bezier `at` / 厳密解ばね `at_spring` / `presence` / hover `feel`)・要素矩形の記録。動いている間だけ次フレーム要求
+  theme.rs       テーマ系統 (Liquid Glass / Frost Graphite)、配色 (ダーク/ライト)・フォント
+  wallpaper.rs   オーロラ / Frost Graphite のモノクロ壁紙の生成 / ユーザー画像
   prefs.rs       %APPDATA%\DeviceHub\prefs.json
   keycode.rs     GPUI キー名 → HID usage
   palette.rs     コマンドパレット (Ctrl+K)
@@ -45,6 +45,35 @@ src/
 UI 操作 → `Shell::apply(Change)` → `Hub::apply` が UI の状態を即書き換え (apply_local) → ワーカーへ送信 →
 ワーカーが同じ対象の古い変更を捨てて `DeviceDriver::apply` → 結果 (`Msg::Applied`) → 失敗ならトースト + `read` し直し。
 ヘッダの点: 黄 = 書き込み待ちあり / 緑 = 同期済み。
+
+## テーマ系統
+
+`theme.rs` は系統 (Liquid Glass / Frost Graphite) と明暗を独立して持ち、`prefs.json` の `theme_family` に保存する
+(既存ファイルでは既定 `liquid`)。Frost Graphite は `docs/mockups/frost-graphite.html` の TOKENS を `Pal` に写した白黒テーマで、
+選択値・主ボタンだけを `inv` / `inv_fg` に反転し、セグメント選択は霜チップ、タブは下線、壁紙はクローム球のモノクロになる。
+Liquid Glass 側の色と部品の既定値は変えない。切替はアプリ設定の「デザイン」またはコマンドパレット。
+Graphite のホームカードには caps (mouse / keyboard / peq) から選んだモノクロ線画を出し、DPI タブでは ←/→ で編集ステージを移動できる
+(テキスト入力・モーダル・コマンドパレットが前面のときは従来どおりそちらへ渡す)。
+
+Graphite のガラスは `glass.rs` で面ごとに分ける。外側の `Panel` / 浮いた `Clear` は外周だけ薄く屈折し、
+画素ごとのリム光 (左上を主光、右下を弱い補助光) と連続リムを乗せる。カード内の操作部は `Frost` に解決し、
+再屈折させずに弱い曇り・細い反射・下端の落ち影だけにする (`NEST_HOSTS` は親カードより後に描かれる子が
+二度曲げないようにフレームごとへ張る矩形リスト)。RGB 分散は白黒テーマなので 0.018 に抑え、
+粒子は通常 alpha 合成で汚れない強さに焼き込む。Liquid Glass の既存パラメータは変えない。
+
+## モーション
+
+`motion.rs` は Valorant tracker と同じ考え方で、実時間だけを使って補間する。`at` は cubic-bezier
+(ホバー 140ms、メニュー 180/120ms、ダイアログ 220/150ms、インジケータ 200ms) で、
+タブ下線・セグメントの選択チップ・トグル位置・presence・ホバー/押下はこの行き過ぎない曲線に統一している。
+ページ/デバイス/タブの内容は切替時に fade せず即時に差し替え、点滅やガラスの明滅を避ける。選択行の霜チップと
+Graphite のトグル色や性能タイルの選択色も補間せず即時にし、動きはタブ下線・セグメントチップのスライドとつまみの移動だけに残す。
+壁紙はクロスフェード。
+`at_spring` はフレームレートに依らない厳密解ばねで、DPI 数字・スライダー・live depth など連続値にだけ使う。
+ばねは臨界減衰を使い、逆向きの速度は retarget 時に切り、目標を跨ぐステップでは target に貼り付け、距離 0.002 未満で静止する
+(overshoot と末尾の sub-pixel の這いを防ぐ)。`prefs.json` の `motion=false` では全補間が即時値になり、GPUI vendor の
+`smooth_wheel` も切る。スクロール領域は `.overflow_*_scroll().smooth_wheel()` を付けたものだけバネ補間される。
+`end_frame` は補間中だけ `request_animation_frame` するので、アイドル時は従来どおり再描画しない。
 
 ## 新しい画面が必要になったら
 

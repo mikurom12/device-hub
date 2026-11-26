@@ -838,7 +838,7 @@ impl Shell {
         div()
             .id("obs-scroll")
             .size_full()
-            .overflow_y_scroll()
+            .overflow_y_scroll().smooth_wheel()
             .child(
                 div()
                     .flex()

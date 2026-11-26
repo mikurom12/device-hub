@@ -858,7 +858,7 @@ impl Shell {
         div()
             .id("auto-scroll")
             .size_full()
-            .overflow_y_scroll()
+            .overflow_y_scroll().smooth_wheel()
             .child(
                 div()
                     .flex()

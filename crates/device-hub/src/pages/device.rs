@@ -82,7 +82,7 @@ impl Shell {
         div()
             .id("device-scroll")
             .size_full()
-            .overflow_y_scroll()
+            .overflow_y_scroll().smooth_wheel()
             .track_scroll(&self.scroll)
             .child(
                 div()
@@ -323,19 +323,13 @@ impl Shell {
 
     fn loading_card(&self) -> impl IntoElement {
         let p = theme::pal();
-        motion::keep_alive();
-        let t = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs_f32())
-            .unwrap_or(0.);
         let mut dots = div().flex().gap(px(6.));
-        for i in 0..3 {
-            let a = ((t * 4. - i as f32 * 0.6).sin() * 0.5 + 0.5).powf(2.);
+        for a in [0.38, 0.62, 0.86] {
             dots = dots.child(
                 div()
                     .size(px(8.))
                     .rounded(px(4.))
-                    .bg(theme::alpha(p.accent, 0.3 + a * 0.7)),
+                    .bg(theme::alpha(p.accent, a)),
             );
         }
         ui::card().child(

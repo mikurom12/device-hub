@@ -10,6 +10,8 @@ static LIGHT: AtomicBool = AtomicBool::new(false);
 static GLASS: AtomicBool = AtomicBool::new(true);
 static MOTION: AtomicBool = AtomicBool::new(true);
 static ACCENT: AtomicU8 = AtomicU8::new(0);
+/// テーマ系統 (0 = Liquid Glass, 1 = Frost Graphite)。
+static FAMILY: AtomicU8 = AtomicU8::new(0);
 
 pub fn set_light(v: bool) {
     LIGHT.store(v, Ordering::Relaxed);
@@ -34,6 +36,24 @@ pub fn set_accent(i: u8) {
 }
 pub fn accent_index() -> u8 {
     ACCENT.load(Ordering::Relaxed)
+}
+
+/// テーマ系統の選択肢: (id, 表示名)。
+pub const THEME_FAMILIES: &[(&str, &str)] =
+    &[("liquid", "Liquid Glass"), ("graphite", "Frost Graphite")];
+
+pub fn set_theme_family_id(id: &str) {
+    let i = THEME_FAMILIES.iter().position(|o| o.0 == id).unwrap_or(0);
+    FAMILY.store(i as u8, Ordering::Relaxed);
+}
+pub fn theme_family_index() -> usize {
+    (FAMILY.load(Ordering::Relaxed) as usize).min(THEME_FAMILIES.len() - 1)
+}
+pub fn theme_family_id() -> &'static str {
+    THEME_FAMILIES[theme_family_index()].0
+}
+pub fn is_graphite() -> bool {
+    theme_family_id() == "graphite"
 }
 
 /// アクセント候補 (名前, 色)。
@@ -172,6 +192,23 @@ pub const SIDEBAR_W: f32 = 248.;
 pub const R_CARD: f32 = 22.;
 pub const R_CTRL: f32 = 12.;
 pub const GAP: f32 = 14.;
+
+/// 現在のテーマ系統でのカード角丸。
+pub fn r_card() -> f32 {
+    if is_graphite() {
+        16.
+    } else {
+        R_CARD
+    }
+}
+/// 現在のテーマ系統での操作部角丸。
+pub fn r_ctrl() -> f32 {
+    if is_graphite() {
+        10.
+    } else {
+        R_CTRL
+    }
+}
 /// ページの左右余白。
 pub const PAGE_PAD: f32 = 10.;
 /// ページ上部 (タイトルバーの下)。
@@ -232,9 +269,33 @@ pub struct Pal {
     /// キーキャップ。
     pub key: Hsla,
     pub key_edge: Hsla,
+    /// ガラス内側のごく薄い縁 (Frost Graphite)。
+    pub inner: Hsla,
+    /// 値に比例して埋める中立の塗り。
+    pub fill: Hsla,
+    /// トグル/スライダーのつまみ。
+    pub knob: Hsla,
+    /// セグメント選択の浮きチップ。
+    pub chip_bg: Hsla,
+    pub chip_shadow: Hsla,
+    /// サイドバー選択行。
+    pub sel: Hsla,
+    pub sel_shadow: Hsla,
+    /// 反転色 (選択中の値と主ボタンだけ)。
+    pub inv: Hsla,
+    pub inv_fg: Hsla,
+    /// 反転面の中で値に比例して埋める塗り。
+    pub inv_fill: Hsla,
+    /// スライダーつまみの外側の薄いリング。
+    pub thumb_ring: Hsla,
+    /// 粒子の強さ (0..1)。0 なら描かない。
+    pub grain: f32,
 }
 
 pub fn pal() -> Pal {
+    if is_graphite() {
+        return graphite_pal(is_light());
+    }
     let light = is_light();
     let acc = ACCENTS[accent_index() as usize].1;
     let accent = hex(acc, 1.);
@@ -263,6 +324,18 @@ pub fn pal() -> Pal {
             shadow: hex(0x1b2a4a, 0.16),
             key: hex(0xffffff, 0.7),
             key_edge: hex(0x8090b0, 0.28),
+            inner: hex(0xffffff, 0.2),
+            fill: hex(acc, 0.18),
+            knob: hex(0xffffff, 1.),
+            chip_bg: hex(0xffffff, 0.95),
+            chip_shadow: hex(0x000000, 0.12),
+            sel: hex(acc, 0.18),
+            sel_shadow: hex(0x000000, 0.08),
+            inv: accent,
+            inv_fg: hex(0xffffff, 1.),
+            inv_fill: hex(0xffffff, 0.18),
+            thumb_ring: hex(0x000000, 0.05),
+            grain: 0.,
         }
     } else {
         Pal {
@@ -289,13 +362,156 @@ pub fn pal() -> Pal {
             shadow: hex(0x000000, 0.42),
             key: hex(0xffffff, 0.08),
             key_edge: hex(0xffffff, 0.14),
+            inner: hex(0xffffff, 0.04),
+            fill: hex(acc, 0.2),
+            knob: hex(0xffffff, 1.),
+            chip_bg: hex(0xffffff, 0.16),
+            chip_shadow: hex(0x000000, 0.3),
+            sel: hex(acc, 0.16),
+            sel_shadow: hex(0x000000, 0.2),
+            inv: accent,
+            inv_fg: hex(0x061018, 1.),
+            inv_fill: hex(0x000000, 0.12),
+            thumb_ring: hex(0xffffff, 0.08),
+            grain: 0.,
         }
     }
 }
 
+/// Frost Graphite (docs/mockups/frost-graphite.html の TOKENS)。
+/// `accent` は反転色 inv、`on_accent` は invFg に対応させる。
+fn graphite_pal(light: bool) -> Pal {
+    if light {
+        let inv = hex(0x0b0b0c, 1.);
+        Pal {
+            light,
+            fg: hex(0x0b0b0c, 1.),
+            sub: hex(0x0b0b0c, 0.60),
+            faint: hex(0x0b0b0c, 0.38),
+            accent: inv,
+            accent_soft: hex(0x0b0b0c, 0.07),
+            on_accent: hex(0xffffff, 1.),
+            danger: hex(0xc93636, 1.),
+            ok: hex(0x0b0b0c, 0.82),
+            warn: hex(0x0b0b0c, 0.55),
+            glass_top: hex(0xffffff, 0.52),
+            glass_bot: hex(0xffffff, 0.46),
+            solid: hex(0xe9eaed, 1.),
+            edge: hex(0x000000, 0.06),
+            rim: hex(0xffffff, 0.95),
+            ctrl: hex(0x000000, 0.035),
+            ctrl_hover: hex(0x000000, 0.065),
+            track: hex(0x000000, 0.13),
+            hair: hex(0x000000, 0.075),
+            scrim: hex(0x565a64, 0.22),
+            shadow: hex(0x282a34, 0.22),
+            key: hex(0xffffff, 0.72),
+            key_edge: hex(0x000000, 0.1),
+            inner: hex(0xffffff, 0.25),
+            fill: hex(0x000000, 0.07),
+            knob: hex(0xffffff, 1.),
+            chip_bg: hex(0xffffff, 1.),
+            chip_shadow: hex(0x000000, 0.10),
+            sel: hex(0xffffff, 0.78),
+            sel_shadow: hex(0x000000, 0.12),
+            inv,
+            inv_fg: hex(0xffffff, 1.),
+            inv_fill: hex(0xffffff, 0.10),
+            thumb_ring: hex(0x000000, 0.05),
+            grain: 0.20,
+        }
+    } else {
+        let inv = hex(0xf4f4f5, 1.);
+        Pal {
+            light,
+            fg: hex(0xf4f4f5, 1.),
+            sub: hex(0xf4f4f5, 0.62),
+            faint: hex(0xf4f4f5, 0.36),
+            accent: inv,
+            accent_soft: hex(0xffffff, 0.08),
+            on_accent: hex(0x0a0a0b, 1.),
+            danger: hex(0xff7474, 1.),
+            ok: hex(0xf4f4f5, 0.9),
+            warn: hex(0xf4f4f5, 0.55),
+            glass_top: hex(0x141416, 0.46),
+            glass_bot: hex(0x141416, 0.40),
+            solid: hex(0x09090a, 1.),
+            edge: hex(0xffffff, 0.09),
+            rim: hex(0xffffff, 0.16),
+            ctrl: hex(0xffffff, 0.05),
+            ctrl_hover: hex(0xffffff, 0.09),
+            track: hex(0xffffff, 0.16),
+            hair: hex(0xffffff, 0.08),
+            scrim: hex(0x000000, 0.5),
+            shadow: hex(0x000000, 0.55),
+            key: hex(0xffffff, 0.07),
+            key_edge: hex(0xffffff, 0.12),
+            inner: hex(0xffffff, 0.02),
+            fill: hex(0xffffff, 0.12),
+            knob: hex(0xe9e9eb, 1.),
+            chip_bg: hex(0xffffff, 0.14),
+            chip_shadow: hex(0x000000, 0.35),
+            sel: hex(0xffffff, 0.08),
+            sel_shadow: hex(0xffffff, 0.08),
+            inv,
+            inv_fg: hex(0x0a0a0b, 1.),
+            inv_fill: hex(0x000000, 0.08),
+            thumb_ring: hex(0xffffff, 0.08),
+            grain: 0.11,
+        }
+    }
+}
+
+/// Frost Graphite の霜チップの影 (TOKENS chipShadow)。
+pub fn chip_shadows(p: Pal) -> Vec<BoxShadow> {
+    if p.light {
+        vec![
+            BoxShadow {
+                color: p.chip_shadow,
+                offset: point(px(0.), px(1.)),
+                blur_radius: px(2.),
+                spread_radius: px(0.),
+                inset: false,
+            },
+            BoxShadow {
+                color: alpha(p.chip_shadow, 0.06),
+                offset: point(px(0.), px(2.)),
+                blur_radius: px(8.),
+                spread_radius: px(0.),
+                inset: false,
+            },
+        ]
+    } else {
+        vec![
+            BoxShadow {
+                color: hex(0xffffff, 0.12),
+                offset: point(px(0.), px(1.)),
+                blur_radius: px(0.),
+                spread_radius: px(0.),
+                inset: true,
+            },
+            BoxShadow {
+                color: p.chip_shadow,
+                offset: point(px(0.), px(2.)),
+                blur_radius: px(6.),
+                spread_radius: px(0.),
+                inset: false,
+            },
+        ]
+    }
+}
+
+
 /// アクセントを少し明るく/暗くした派生色 (グラデーション用)。
 pub fn accent_grad() -> Background {
     let p = pal();
+    if is_graphite() {
+        return linear_gradient(
+            135.,
+            linear_color_stop(p.inv, 0.),
+            linear_color_stop(p.inv, 1.),
+        );
+    }
     let mut a2 = p.accent;
     a2.h = (a2.h + 0.06) % 1.;
     a2.l = (a2.l + 0.08).min(0.85);

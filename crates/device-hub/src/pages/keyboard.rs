@@ -221,7 +221,7 @@ impl Shell {
             .id(SharedString::from(format!("kbscroll:{id}")))
             .relative()
             .w_full()
-            .overflow_x_scroll()
+            .overflow_x_scroll().smooth_wheel()
             .child(motion::track(wrap))
             .child(board)
     }

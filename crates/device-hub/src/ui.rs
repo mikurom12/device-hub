@@ -21,10 +21,15 @@ pub fn icon(name: &str, size: f32, color: Hsla) -> Svg {
 
 pub fn title(text: impl Into<SharedString>) -> Div {
     let p = theme::pal();
+    let graphite = theme::is_graphite();
     div()
-        .text_size(px(28.))
-        .line_height(px(34.))
-        .font_weight(FontWeight::BOLD)
+        .text_size(px(if graphite { 38. } else { 28. }))
+        .line_height(px(if graphite { 40. } else { 34. }))
+        .font_weight(if graphite {
+            FontWeight::LIGHT
+        } else {
+            FontWeight::BOLD
+        })
         .text_color(p.fg)
         .child(text.into())
 }
@@ -62,8 +67,12 @@ pub fn big_number(text: impl Into<SharedString>, size: f32) -> Div {
     div()
         .font(theme::display_font())
         .text_size(px(size))
-        .line_height(px(size * 1.05))
-        .font_weight(FontWeight::BOLD)
+        .line_height(px(size * if theme::is_graphite() { 0.92 } else { 1.05 }))
+        .font_weight(if theme::is_graphite() {
+            FontWeight::EXTRA_LIGHT
+        } else {
+            FontWeight::BOLD
+        })
         .text_color(p.fg)
         .child(text.into())
 }
@@ -73,17 +82,19 @@ pub fn big_number(text: impl Into<SharedString>, size: f32) -> Div {
 /// ガラスのカード。子を足して使う。
 pub fn card() -> Div {
     let p = theme::pal();
+    let graphite = theme::is_graphite();
+    let rr = theme::r_card();
     div()
         .relative()
-        .rounded(px(theme::R_CARD))
+        .rounded(px(rr))
         .shadow(vec![BoxShadow {
-            color: theme::alpha(p.shadow, p.shadow.a * 0.8),
-            offset: point(px(0.), px(10.)),
-            blur_radius: px(32.),
-            spread_radius: px(-12.),
+            color: theme::alpha(p.shadow, p.shadow.a * if graphite { 0.72 } else { 0.8 }),
+            offset: point(px(0.), px(if graphite { 24. } else { 10. })),
+            blur_radius: px(if graphite { 48. } else { 32. }),
+            spread_radius: px(if graphite { -18. } else { -12. }),
             inset: false,
         }])
-        .child(glass::surface(glass::Kind::Panel, theme::R_CARD))
+        .child(glass::surface(glass::Kind::Panel, rr))
 }
 
 /// 見出し付きカード。`body` に行を足す。
@@ -298,12 +309,16 @@ pub fn button(
 ) -> Stateful<Div> {
     let p = theme::pal();
     let id: SharedString = id.into();
+    let feel_key = format!("btn:{id}");
+    let (hover_e, press_e) = motion::feel(&feel_key);
+    let touch_e = (hover_e * 0.75 + press_e * 0.25).min(1.);
     let (fg, bg): (Hsla, Option<Background>) = match style {
         Btn::Primary => (p.on_accent, Some(theme::accent_grad())),
         Btn::Danger => (p.danger, Some(theme::alpha(p.danger, 0.12).into())),
         Btn::Glass => (p.fg, None),
         Btn::Ghost => (p.sub, None),
     };
+    let rr = theme::r_ctrl();
     let mut d = div()
         .id(id.clone())
         .relative()
@@ -313,40 +328,45 @@ pub fn button(
         .items_center()
         .justify_center()
         .gap(px(7.))
-        .rounded(px(theme::R_CTRL))
+        .rounded(px(rr))
         .cursor_pointer()
         .text_size(px(13.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(fg);
+        .font_weight(if theme::is_graphite() {
+            FontWeight::MEDIUM
+        } else {
+            FontWeight::SEMIBOLD
+        })
+        .text_color(fg)
+        .child(motion::track(feel_key));
     match style {
         Btn::Glass => {
-            d = d.child(glass::surface_hover(
-                glass::Kind::Frost,
-                theme::R_CTRL,
-                id.to_string(),
-            ));
+            d = d.child(glass::surface_hover(glass::Kind::Frost, rr, id.to_string()));
         }
         Btn::Ghost => {
-            d = d.hover(|s| s.bg(p.ctrl));
+            d = d.bg(theme::alpha(p.ctrl_hover, p.ctrl_hover.a * touch_e));
         }
         Btn::Primary => {
             d = d
                 .when_some(bg, |d, b| d.bg(b))
                 .shadow(vec![BoxShadow {
-                    color: theme::alpha(p.accent, 0.4),
-                    offset: point(px(0.), px(6.)),
-                    blur_radius: px(16.),
-                    spread_radius: px(-6.),
+                    color: if theme::is_graphite() {
+                        theme::alpha(p.shadow, 0.28 + hover_e * 0.12)
+                    } else {
+                        theme::alpha(p.accent, 0.4 + hover_e * 0.14)
+                    },
+                    offset: point(px(0.), px(if theme::is_graphite() { 3. } else { 6. } + hover_e * 2.)),
+                    blur_radius: px(if theme::is_graphite() { 10. } else { 16. } + hover_e * 5.),
+                    spread_radius: px(if theme::is_graphite() { -4. } else { -6. }),
                     inset: false,
                 }])
-                .hover(|s| s.opacity(0.92));
+                .opacity((1. - hover_e * 0.08 - press_e * 0.06).max(0.82));
         }
         Btn::Danger => {
             d = d
                 .when_some(bg, |d, b| d.bg(b))
                 .border_1()
-                .border_color(theme::alpha(p.danger, 0.3))
-                .hover(|s| s.bg(theme::alpha(p.danger, 0.2)));
+                .border_color(theme::alpha(p.danger, 0.3 + hover_e * 0.2))
+                .bg(theme::alpha(p.danger, 0.12 + touch_e * 0.08));
         }
     }
     d.when_some(icon_name, |d, n| {
@@ -366,16 +386,22 @@ pub fn icon_button(
     on: impl Fn(&mut Shell, &mut Window, &mut Context<Shell>) + 'static,
 ) -> Stateful<Div> {
     let p = theme::pal();
+    let id: SharedString = id.into();
+    let key = format!("ib:{id}");
+    let (hover_e, press_e) = motion::feel(&key);
+    let a = (hover_e * 0.8 + press_e * 0.2).min(1.);
     div()
-        .id(id.into())
+        .id(id)
+        .relative()
         .size(px(30.))
         .rounded(px(10.))
         .flex()
         .items_center()
         .justify_center()
         .cursor_pointer()
-        .hover(|s| s.bg(p.ctrl_hover))
-        .child(icon(icon_name, 15., p.sub))
+        .bg(theme::alpha(p.ctrl_hover, p.ctrl_hover.a * a))
+        .child(motion::track(key))
+        .child(icon(icon_name, 15., theme::mix(p.sub, p.fg, hover_e * 0.7)))
         .on_click(cx.listener(move |this, _, w, cx| on(this, w, cx)))
 }
 
@@ -391,12 +417,24 @@ pub fn toggle(
     let id: SharedString = id.into();
     let k = motion::ease(&format!("tg:{id}"), on);
     let pressed_key = format!("tgp:{id}");
-    let pressed = motion::is_down() && motion::hovered(&pressed_key);
-    let squash = motion::ease(&format!("tgs:{id}"), pressed);
-    let (w, h) = (46., 28.);
-    let knob = 22. + squash * 6.;
+    let (_hover_e, press_e) = motion::feel(&pressed_key);
+    let squash = press_e;
+    let graphite = theme::is_graphite();
+    let (w, h) = if graphite { (38., 22.) } else { (46., 28.) };
+    let knob_h = h - 6.;
+    let knob = knob_h + squash * if graphite { 3. } else { 6. };
     let x = 3. + k * (w - 6. - knob);
-    let track = theme::mix(p.track, p.accent, k);
+    let on_color = if graphite { p.inv } else { p.accent };
+    let track = if graphite {
+        if on { p.inv } else { p.track }
+    } else {
+        theme::mix(p.track, on_color, k)
+    };
+    let knob_color = if graphite {
+        if on { p.inv_fg } else { p.knob }
+    } else {
+        theme::hex(0xffffff, 1. - squash * 0.75)
+    };
     div()
         .id(id.clone())
         .relative()
@@ -413,11 +451,11 @@ pub fn toggle(
                 .top(px(3.))
                 .left(px(x))
                 .w(px(knob))
-                .h(px(22.))
-                .rounded(px(11.))
-                .bg(theme::hex(0xffffff, 1. - squash * 0.75))
+                .h(px(knob_h))
+                .rounded(px(knob_h / 2.))
+                .bg(knob_color)
                 .shadow(vec![BoxShadow {
-                    color: theme::hex(0x000000, 0.25),
+                    color: theme::hex(0x000000, if graphite { 0.3 } else { 0.25 }),
                     offset: point(px(0.), px(2.)),
                     blur_radius: px(6.),
                     spread_radius: px(0.),
@@ -490,13 +528,57 @@ pub fn slider_curve(
     };
     let ts = motion::spring_with(&format!("slv:{id}"), t, 30.);
     let grow = motion::ease(&format!("slg:{id}"), dragging);
-    let accent = color.unwrap_or(p.accent);
+    let graphite = theme::is_graphite();
+    let accent = if graphite {
+        p.fg
+    } else {
+        color.unwrap_or(p.accent)
+    };
     let f = Rc::new(f);
     let apply: CbF = Rc::new(move |this: &mut Shell, t: f32, cx: &mut Context<Shell>| {
         let v = quantize(min + t.powf(gamma) * (max - min), min, max, step);
         f(this, v, cx);
     });
-    let thumb_w = 22. + grow * 10.;
+    let track_h = if graphite { 3. } else { 6. };
+    let thumb_base = if graphite { 18. } else { 22. };
+    let thumb_w = thumb_base + grow * if graphite { 3. } else { 10. };
+    let thumb_h = thumb_base + grow * if graphite { 2. } else { 4. };
+    let thumb_y = -(thumb_h - track_h) / 2.;
+    let fill_bg: Background = if graphite {
+        accent.into()
+    } else {
+        linear_gradient(
+            90.,
+            linear_color_stop(theme::alpha(accent, 0.55), 0.),
+            linear_color_stop(accent, 1.),
+        )
+    };
+    let thumb_shadows = if graphite {
+        vec![
+            BoxShadow {
+                color: p.thumb_ring,
+                offset: point(px(0.), px(0.)),
+                blur_radius: px(0.),
+                spread_radius: px(5.),
+                inset: false,
+            },
+            BoxShadow {
+                color: theme::hex(0x000000, 0.3),
+                offset: point(px(0.), px(2.)),
+                blur_radius: px(6.),
+                spread_radius: px(0.),
+                inset: false,
+            },
+        ]
+    } else {
+        vec![BoxShadow {
+            color: theme::hex(0x000000, 0.28),
+            offset: point(px(0.), px(2.)),
+            blur_radius: px(7.),
+            spread_radius: px(0.),
+            inset: false,
+        }]
+    };
     let rk = rect_key.clone();
     div()
         .id(SharedString::from(format!("slider-{id}")))
@@ -512,9 +594,9 @@ pub fn slider_curve(
                 .absolute()
                 .left(px(11.))
                 .right(px(11.))
-                .top(px(12.))
-                .h(px(6.))
-                .rounded(px(3.))
+                .top(px(if graphite { 13.5 } else { 12. }))
+                .h(px(track_h))
+                .rounded(px(track_h / 2.))
                 .bg(p.track)
                 .child(motion::track(rect_key))
                 .child(
@@ -524,31 +606,31 @@ pub fn slider_curve(
                         .top_0()
                         .h_full()
                         .w(relative(ts))
-                        .rounded(px(3.))
-                        .bg(linear_gradient(
-                            90.,
-                            linear_color_stop(theme::alpha(accent, 0.55), 0.),
-                            linear_color_stop(accent, 1.),
-                        )),
+                        .rounded(px(track_h / 2.))
+                        .bg(fill_bg),
                 )
                 // つまみ
                 .child(
                     div()
                         .absolute()
                         .left(relative(ts))
-                        .top(px(-8. - grow * 2.))
+                        .top(px(thumb_y))
                         .ml(px(-thumb_w / 2.))
                         .w(px(thumb_w))
-                        .h(px(22. + grow * 4.))
-                        .rounded(px(13.))
-                        .bg(theme::hex(0xffffff, 1. - grow * 0.8))
-                        .shadow(vec![BoxShadow {
-                            color: theme::hex(0x000000, 0.28),
-                            offset: point(px(0.), px(2.)),
-                            blur_radius: px(7.),
-                            spread_radius: px(0.),
-                            inset: false,
-                        }])
+                        .h(px(thumb_h))
+                        .rounded(px(thumb_h / 2.))
+                        .bg(if graphite {
+                            p.knob
+                        } else {
+                            theme::hex(0xffffff, 1. - grow * 0.8)
+                        })
+                        .border_1()
+                        .border_color(if graphite {
+                            p.edge
+                        } else {
+                            theme::alpha(p.edge, 0.)
+                        })
+                        .shadow(thumb_shadows)
                         .when(grow > 0.05, |d| {
                             d.child(
                                 canvas(
@@ -652,14 +734,20 @@ pub fn segmented(
 ) -> Div {
     let p = theme::pal();
     let n = options.len().max(1);
-    let x = motion::spring_with(&format!("seg:{id}"), selected as f32, 22.);
+    let x = motion::at(
+        &format!("seg:{id}"),
+        selected as f32,
+        motion::DUR_INDICATOR,
+        motion::EASE_OUT,
+    );
     let f = Rc::new(f);
+    let graphite = theme::is_graphite();
     let mut row = div()
         .relative()
         .flex()
         .flex_row()
         .p(px(3.))
-        .rounded(px(12.))
+        .rounded(px(if graphite { 10. } else { 12. }))
         .bg(p.ctrl)
         .border_1()
         .border_color(p.hair);
@@ -678,21 +766,31 @@ pub fn segmented(
                     .bottom_0()
                     .left(relative(x / n as f32))
                     .w(relative(1. / n as f32))
-                    .rounded(px(9.))
-                    .bg(if p.light {
+                    .rounded(px(if graphite { 7. } else { 9. }))
+                    .bg(if graphite {
+                        p.chip_bg
+                    } else if p.light {
                         theme::hex(0xffffff, 0.95)
                     } else {
                         theme::hex(0xffffff, 0.16)
                     })
                     .border_1()
-                    .border_color(p.edge)
-                    .shadow(vec![BoxShadow {
-                        color: theme::hex(0x000000, if p.light { 0.12 } else { 0.3 }),
-                        offset: point(px(0.), px(2.)),
-                        blur_radius: px(8.),
-                        spread_radius: px(-2.),
-                        inset: false,
-                    }]),
+                    .border_color(if graphite {
+                        theme::alpha(p.edge, 0.)
+                    } else {
+                        p.edge
+                    })
+                    .shadow(if graphite {
+                        theme::chip_shadows(p)
+                    } else {
+                        vec![BoxShadow {
+                            color: theme::hex(0x000000, if p.light { 0.12 } else { 0.3 }),
+                            offset: point(px(0.), px(2.)),
+                            blur_radius: px(8.),
+                            spread_radius: px(-2.),
+                            inset: false,
+                        }]
+                    }),
             ),
     );
     for (i, o) in options.iter().enumerate() {
@@ -927,7 +1025,57 @@ pub fn tab_bar(
 ) -> Div {
     let p = theme::pal();
     let f = Rc::new(f);
-    // 各タブの位置を記録し、選択面をばねで動かす。
+    if theme::is_graphite() {
+        // Frost Graphite: 浮いたピルではなく、細い下線だけのタブ。
+        let mut bar = div()
+            .relative()
+            .flex()
+            .flex_row()
+            .gap(px(26.))
+            .border_b_1()
+            .border_color(p.hair);
+        for (i, (label, _ic)) in tabs.iter().enumerate() {
+            let on = i == selected;
+            let f = f.clone();
+            let mut tab = div()
+                .id(SharedString::from(format!("tab-{id}-{i}")))
+                .relative()
+                .h(px(38.))
+                .flex()
+                .items_center()
+                .cursor_pointer()
+                .text_size(px(13.))
+                .font_weight(if on {
+                    FontWeight::MEDIUM
+                } else {
+                    FontWeight::NORMAL
+                })
+                .text_color(if on { p.fg } else { p.sub })
+                .whitespace_nowrap()
+                .child(label.clone());
+            if !on {
+                tab = tab.hover(|s| s.text_color(p.fg));
+            }
+            if on {
+                tab = tab.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .h(px(2.))
+                        .rounded(px(2.))
+                        .bg(p.fg),
+                );
+            }
+            bar = bar.child(tab.on_click(cx.listener(move |this, _, _, cx| {
+                f(this, i, cx);
+                cx.notify();
+            })));
+        }
+        return bar;
+    }
+    // 各タブの位置を記録し、選択面を時間補間で動かす。
     let cont = format!("tabs:{id}");
     let sel_rect = motion::rect(&format!("tab:{id}:{selected}"));
     let base = motion::rect(&cont);
@@ -935,8 +1083,18 @@ pub fn tab_bar(
         (Some(r), Some(b)) => (r[0] - b[0], r[2]),
         _ => (0., 0.),
     };
-    let x = motion::spring_with(&format!("tabx:{id}"), tx, 20.);
-    let w = motion::spring_with(&format!("tabw:{id}"), tw, 20.);
+    let x = motion::at(
+        &format!("tabx:{id}"),
+        tx,
+        motion::DUR_INDICATOR,
+        motion::EASE_OUT,
+    );
+    let w = motion::at(
+        &format!("tabw:{id}"),
+        tw,
+        motion::DUR_INDICATOR,
+        motion::EASE_OUT,
+    );
     let mut bar = div()
         .relative()
         .flex()

@@ -9,6 +9,8 @@ use std::path::PathBuf;
 pub struct Prefs {
     /// "dark" | "light"
     pub theme: String,
+    /// テーマ系統: "liquid" | "graphite" (既存の prefs.json では liquid)。
+    pub theme_family: String,
     pub accent: u8,
     /// フォント (theme::FONT_OPTIONS の id)。
     pub font: String,
@@ -148,6 +150,7 @@ impl Default for Prefs {
     fn default() -> Self {
         Self {
             theme: "dark".into(),
+            theme_family: "liquid".into(),
             accent: 0,
             font: "modern".into(),
             glass: true,

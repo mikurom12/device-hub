@@ -108,6 +108,129 @@ fn generate(light: bool, accent: u32, w: u32, h: u32) -> RgbaImage {
     img
 }
 
+fn mix_to(c: &mut [f32; 3], target: [f32; 3], k: f32) {
+    let k = k.clamp(0., 1.);
+    for (ci, ti) in c.iter_mut().zip(target) {
+        *ci += (ti - *ci) * k;
+    }
+}
+
+fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
+    let t = ((x - a) / (b - a)).clamp(0., 1.);
+    t * t * (3. - 2. * t)
+}
+
+/// Frost Graphite のモノクロ壁紙: クロームの球 3 個、細いリング 2 本、
+/// 斜めの光の帯、左上の光。色は使わず、明暗だけで立体を作る。
+fn generate_graphite(light: bool, w: u32, h: u32) -> RgbaImage {
+    let mut img = RgbaImage::new(w, h);
+    let (wf, hf) = (w as f32, h as f32);
+    let aspect = wf / hf;
+    let bg = if light {
+        rgbf(0xe9eaed)
+    } else {
+        rgbf(0x09090a)
+    };
+    let hi = rgbf(if light { 0xffffff } else { 0xf6f6f7 });
+    let mid = rgbf(if light { 0xb4b6bd } else { 0x55555b });
+    let lo = rgbf(if light { 0x5d5f67 } else { 0x0c0c0d });
+    let white = [255., 255., 255.];
+    let black = [0., 0., 0.];
+    let ring_rgb = if light { black } else { white };
+    let beam_rgb = white;
+    let glow_a = if light { 0.95 } else { 0.13 };
+    let ring_a = if light { 0.12 } else { 0.16 };
+    let beam_a = if light { 0.8 } else { 0.07 };
+
+    let sphere = |u: f32, v: f32, cx: f32, cy: f32, r: f32| -> Option<(f32, f32)> {
+        let dx = (u - cx) * aspect;
+        let dy = v - cy;
+        let d = (dx * dx + dy * dy).sqrt() / r;
+        if d > 1.02 {
+            return None;
+        }
+        // CSS radial-gradient(circle at 34% 30%): 光源中心は球の左上。
+        let hx = dx + r * 0.30;
+        let hy = dy + r * 0.32;
+        let q = (hx * hx + hy * hy).sqrt() / r;
+        Some((d, q))
+    };
+    let chrome = |q: f32| {
+        let mut c = hi;
+        if q < 0.42 {
+            mix_to(&mut c, mid, q / 0.42);
+        } else {
+            c = mid;
+            mix_to(&mut c, lo, ((q - 0.42) / 0.72).min(1.));
+        }
+        c
+    };
+
+    for y in 0..h {
+        let v = (y as f32 + 0.5) / hf;
+        for x in 0..w {
+            let u = (x as f32 + 0.5) / wf;
+            let mut c = bg;
+            // わずかな垂直グラデーション。
+            mix_to(
+                &mut c,
+                if light { white } else { black },
+                if light { v * 0.05 } else { v * 0.12 },
+            );
+
+            // 左上の大きな光。
+            let gx = (u + 0.12) * aspect;
+            let gy = v + 0.18;
+            let g = (-(gx * gx + gy * gy) / 0.42).exp() * glow_a;
+            mix_to(&mut c, white, g);
+
+            // 右側の同心リング 2 本。
+            let rx = (u - 0.909) * aspect;
+            let ry = v - 0.286;
+            let rd = (rx * rx + ry * ry).sqrt();
+            for (rr, aa) in [(0.452, ring_a), (0.583, ring_a * 0.6)] {
+                let k = (-((rd - rr) / 0.004).powi(2)).exp() * aa;
+                mix_to(&mut c, ring_rgb, k);
+            }
+
+            // クローム球 (大 → 中 → 小)。
+            for (cx, cy, r, shade) in [
+                (0.894, 0.357, 0.310, 1.0),
+                (0.356, 0.690, 0.167, 0.88),
+                (0.859, 0.708, 0.089, 0.78),
+            ] {
+                if let Some((d, q)) = sphere(u, v, cx, cy, r) {
+                    let mut sc = chrome(q * shade);
+                    // 縁を少し沈めて球らしくする。
+                    mix_to(&mut sc, lo, smoothstep(0.78, 1.0, d) * 0.32);
+                    let mask = 1. - smoothstep(0.965, 1.0, d);
+                    mix_to(&mut c, sc, mask);
+                }
+            }
+
+            // 斜めの光の帯 (上に重ねる)。角度 -14°、中心 y=0.68。
+            let ang = (-14f32).to_radians();
+            let lx = (u - 0.5) * aspect;
+            let ly = v - 0.68;
+            let dist = (lx * ang.sin() + ly * ang.cos()).abs();
+            let beam = (-(dist / 0.085).powi(2)).exp() * beam_a;
+            mix_to(&mut c, beam_rgb, beam);
+
+            img.put_pixel(
+                x,
+                y,
+                image::Rgba([
+                    c[0].clamp(0., 255.) as u8,
+                    c[1].clamp(0., 255.) as u8,
+                    c[2].clamp(0., 255.) as u8,
+                    255,
+                ]),
+            );
+        }
+    }
+    img
+}
+
 static CACHE: Mutex<Option<HashMap<String, Arc<RenderImage>>>> = Mutex::new(None);
 
 fn to_render(img: RgbaImage) -> Arc<RenderImage> {
@@ -119,13 +242,18 @@ fn to_render(img: RgbaImage) -> Arc<RenderImage> {
     Arc::new(RenderImage::new(smallvec::smallvec![Frame::new(img)]))
 }
 
-/// 今のテーマ・アクセント・ユーザー画像に合う壁紙。
+/// 今のテーマ系統・明暗・アクセント・ユーザー画像に合う壁紙。
+/// ユーザー画像がある場合はテーマ系統よりそちらを優先する。
 pub fn current(custom: Option<&str>) -> Arc<RenderImage> {
     let light = crate::theme::is_light();
+    let graphite = crate::theme::is_graphite();
     let accent = crate::theme::ACCENTS[crate::theme::accent_index() as usize].1;
     let key = match custom {
         Some(p) => format!("file:{p}"),
-        None => format!("aurora:{light}:{accent:06x}"),
+        None => format!(
+            "{}:{light}:{accent:06x}",
+            if graphite { "graphite" } else { "aurora" }
+        ),
     };
     let mut g = CACHE.lock().unwrap_or_else(|p| p.into_inner());
     let map = g.get_or_insert_with(HashMap::new);
@@ -138,7 +266,13 @@ pub fn current(custom: Option<&str>) -> Arc<RenderImage> {
             let i = i.thumbnail(1920, 1200);
             i.to_rgba8()
         })
-        .unwrap_or_else(|| generate(light, accent, 720, 450));
+        .unwrap_or_else(|| {
+            if graphite {
+                generate_graphite(light, 720, 450)
+            } else {
+                generate(light, accent, 720, 450)
+            }
+        });
     let out = to_render(img);
     if map.len() > 8 {
         map.clear();

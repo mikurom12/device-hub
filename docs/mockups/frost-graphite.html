@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frost Graphite</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* ==========================================================================
+   Frost Graphite — mock B
+   方針: 「彫刻の上に霜ガラス」。壁紙は色ではなく立体 (クロームの球・細いリング・光の帯) で作り、
+   ガラス越しのボケで奥行きを出す。UI 自体は細い罫線と大きな細字の数字で構成し、
+   反転 (白黒) は「いま選んでいる値」だけに使う。トークンは下の TOKENS (JS) が唯一の定義。
+   ========================================================================== */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:#161618;color:#d8d8dc;font-family:Inter,"Noto Sans JP","Yu Gothic UI",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;font-feature-settings:"tnum" 1,"cv11" 1}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:inherit}
+
+/* ---- 外側ツールバー (モック用) ---- */
+.bar{position:sticky;top:0;z-index:50;height:52px;display:flex;align-items:center;gap:14px;padding:0 24px;
+  background:rgba(22,22,24,.86);backdrop-filter:blur(14px);border-bottom:1px solid rgba(255,255,255,.06)}
+.bar h2{font-size:13px;font-weight:600;letter-spacing:.01em;color:#f0f0f2}
+.bar .tag{font-size:11px;color:#8b8b92;border:1px solid rgba(255,255,255,.1);padding:2px 8px;border-radius:99px}
+.bar .grow{flex:1}
+.mseg{display:flex;gap:2px;padding:3px;border-radius:10px;background:rgba(255,255,255,.06)}
+.mseg button{font-size:12px;padding:5px 12px;border-radius:7px;color:#9d9da4}
+.mseg button.on{background:#f2f2f3;color:#101012}
+.stage{display:flex;justify-content:center;align-items:flex-start;gap:24px;padding:22px 24px 28px}
+.pane{display:flex;flex-direction:column;align-items:center;gap:10px}
+.pane-label{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#7c7c84}
+.fit{position:relative}
+.tokens{max-width:1100px;margin:8px auto 60px;padding:0 24px}
+.tokens h3{font-size:13px;font-weight:600;color:#ededf0;margin-bottom:4px}
+.tokens p{font-size:12px;color:#8b8b92;margin-bottom:14px}
+.tokens table{width:100%;border-collapse:collapse;font-size:12px}
+.tokens td,.tokens th{padding:7px 10px;border-bottom:1px solid rgba(255,255,255,.06);text-align:left;font-weight:400}
+.tokens th{color:#8b8b92;font-size:11px;letter-spacing:.06em}
+.tokens code{font-family:"Cascadia Mono",Consolas,monospace;font-size:11.5px;color:#d8d8dc}
+.sw{display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-3px;margin-right:8px;
+  box-shadow:0 0 0 1px rgba(255,255,255,.18);background-image:linear-gradient(45deg,#777 25%,transparent 25%,transparent 75%,#777 75%),linear-gradient(45deg,#777 25%,#aaa 25%,#aaa 75%,#777 75%);background-size:6px 6px;background-position:0 0,3px 3px;position:relative;overflow:hidden}
+.sw i{position:absolute;inset:0}
+
+/* ==========================================================================
+   アプリ窓 (1320 x 840 = main.rs と同じ)
+   ========================================================================== */
+.win{position:absolute;left:0;top:0;width:1320px;height:840px;transform-origin:0 0;border-radius:14px;overflow:hidden;
+  background:var(--bg);color:var(--fg);box-shadow:0 0 0 1px var(--frame),0 40px 120px rgba(0,0,0,.55);
+  font-size:13px;line-height:1.45;isolation:isolate}
+
+/* 壁紙: クロームの球 + リング + 光の帯 */
+.wall{position:absolute;inset:0;z-index:0;overflow:hidden}
+.wall i{position:absolute;display:block;border-radius:50%}
+.wall .glow{width:900px;height:700px;left:-220px;top:-300px;background:radial-gradient(closest-side,var(--glow),transparent)}
+.wall .s1{width:520px;height:520px;right:-120px;top:40px;
+  background:radial-gradient(circle at 34% 30%,var(--sHi) 0%,var(--sMid) 38%,var(--sLo) 74%);box-shadow:0 60px 120px var(--shadow)}
+.wall .s2{width:280px;height:280px;left:330px;top:440px;
+  background:radial-gradient(circle at 36% 28%,var(--sHi) 0%,var(--sMid) 42%,var(--sLo) 80%)}
+.wall .s3{width:150px;height:150px;left:1060px;top:520px;
+  background:radial-gradient(circle at 36% 28%,var(--sHi) 0%,var(--sMid) 45%,var(--sLo) 85%)}
+.wall .r1{width:760px;height:760px;right:-260px;top:-140px;border:1px solid var(--ring)}
+.wall .r2{width:980px;height:980px;right:-370px;top:-250px;border:1px solid var(--ring);opacity:.6}
+.wall .beam{border-radius:0;width:1600px;height:180px;left:-200px;top:520px;transform:rotate(-14deg);
+  background:linear-gradient(90deg,transparent,var(--beam),transparent);filter:blur(30px)}
+
+/* 霜ガラス: ぼかし + リム光 + 縁 + 粒子 */
+.glass{position:relative;background:var(--glass);border:1px solid var(--edge);border-radius:16px;
+  -webkit-backdrop-filter:blur(34px) saturate(130%);backdrop-filter:blur(34px) saturate(130%);
+  box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 1px var(--inner),0 24px 48px -18px var(--shadow)}
+.glass::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:var(--grain);mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 1 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.glass > *{position:relative;z-index:1}
+
+/* タイトルバー */
+.tb{position:relative;z-index:2;height:46px;display:flex;align-items:center;gap:12px;padding:0 0 0 20px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;letter-spacing:-.01em;width:230px}
+.mark{width:18px;height:18px;border-radius:5px;background:var(--inv);position:relative}
+.mark::after{content:"";position:absolute;left:5px;top:5px;width:8px;height:8px;border-radius:50%;background:var(--invFg)}
+.cmd{margin-left:20px;width:380px;height:30px;border-radius:9px;display:flex;align-items:center;gap:9px;padding:0 6px 0 11px;
+  background:var(--ctrl);border:1px solid var(--hair);color:var(--faint);font-size:12px}
+.cmd svg{opacity:.8}
+kbd{margin-left:auto;font:500 10.5px Inter,sans-serif;padding:2px 6px;border-radius:5px;border:1px solid var(--hair);color:var(--sub);background:var(--ctrl)}
+.tb .grow{flex:1}
+.wc{display:flex;height:46px}
+.wc span{width:46px;display:grid;place-items:center;color:var(--sub)}
+
+/* レイアウト */
+.lay{position:absolute;z-index:1;inset:46px 0 0 0;display:grid;grid-template-columns:252px 1fr;padding:0 14px 14px}
+.side{display:flex;flex-direction:column;padding:12px 10px 10px}
+.main{position:relative;display:flex;flex-direction:column;min-height:0;padding:10px 10px 0 30px}
+
+/* サイドバー */
+.sh{display:flex;align-items:center;justify-content:space-between;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);padding:12px 10px 8px}
+.nav{display:flex;align-items:center;gap:11px;width:100%;height:36px;padding:0 10px;border-radius:10px;color:var(--sub);font-size:13px}
+.nav:hover{background:var(--ctrl)}
+.nav.on{background:var(--sel);color:var(--fg);box-shadow:var(--selShadow)}
+.dev{display:grid;grid-template-columns:34px 1fr auto;align-items:center;gap:11px;width:100%;padding:8px 10px;border-radius:12px;margin-bottom:2px}
+.dev:hover{background:var(--ctrl)}
+.dev.on{background:var(--sel);box-shadow:var(--selShadow)}
+.dev-ic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--ctrl);border:1px solid var(--hair);color:var(--sub)}
+.dev.on .dev-ic{background:var(--inv);color:var(--invFg);border-color:transparent}
+.dev b{display:block;font-weight:500;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dev small{display:block;font-size:11px;color:var(--faint)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--fg);box-shadow:0 0 0 3px var(--ctrl)}
+.dot.idle{background:transparent;border:1.5px solid var(--faint);box-shadow:none}
+.dot.busy{background:transparent;border:1.5px dashed var(--fg);box-shadow:none;animation:spin 2.4s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.side-foot{margin-top:auto;display:flex;flex-direction:column;gap:6px;padding-top:10px;border-top:1px solid var(--hair)}
+.tsw{display:grid;grid-template-columns:1fr 1fr;gap:2px;padding:3px;border-radius:10px;background:var(--ctrl);margin:4px 0 0}
+.tsw button{height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;gap:6px;font-size:11.5px;color:var(--sub)}
+.tsw button.on{background:var(--chip);color:var(--fg);box-shadow:var(--chipShadow)}
+
+/* デバイスヘッダ */
+.dh{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;padding:14px 0 18px}
+.eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:6px;display:flex;gap:10px;align-items:center}
+.eyebrow i{width:3px;height:3px;border-radius:50%;background:var(--faint)}
+h1{font-size:38px;font-weight:300;letter-spacing:-.03em;line-height:1}
+.dh-r{display:flex;align-items:center;gap:10px}
+.bat{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--sub);padding:0 12px;height:34px;border-radius:10px;border:1px solid var(--hair)}
+.bat-s{display:flex;gap:2px}
+.bat-s i{width:4px;height:12px;border-radius:1.5px;background:var(--track)}
+.bat-s i.f{background:var(--fg)}
+.btn{height:34px;padding:0 14px;border-radius:10px;display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:500;white-space:nowrap}
+.btn.ghost{border:1px solid var(--hair);background:var(--ctrl)}
+.btn.ghost:hover{background:var(--ctrlHover)}
+.btn.pri{background:var(--inv);color:var(--invFg)}
+.btn.sq{width:34px;padding:0;justify-content:center}
+.btn.sm{height:26px;padding:0 10px;font-size:11.5px;border-radius:8px}
+
+/* タブ */
+.tabs{display:flex;gap:26px;border-bottom:1px solid var(--hair)}
+.tab{position:relative;padding:0 0 11px;font-size:13px;color:var(--sub)}
+.tab:hover{color:var(--fg)}
+.tab.on{color:var(--fg);font-weight:500}
+.tab.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;border-radius:2px;background:var(--fg)}
+.content{flex:1;min-height:0;padding:18px 0 14px;overflow:hidden}
+
+/* カード */
+.card{padding:18px 20px}
+.ch{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.lbl{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.meta{font-size:12px;color:var(--sub)}
+.grow{flex:1}
+
+/* 罫線区切りの行 */
+.row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:13px 0;border-top:1px solid var(--hair)}
+.ch + .row{border-top:0}
+.row b{display:block;font-weight:500;font-size:13px}
+.row small{display:block;font-size:11.5px;color:var(--faint);margin-top:1px}
+
+/* トグル */
+.tg{width:38px;height:22px;border-radius:99px;background:var(--track);position:relative;flex:none;transition:background .18s}
+.tg::after{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:var(--knob);box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .2s cubic-bezier(.3,.7,.2,1)}
+.tg.on{background:var(--inv)}
+.tg.on::after{transform:translateX(16px);background:var(--invFg)}
+
+/* セグメント (選択 = 浮き上がる霜チップ) */
+.seg{display:flex;gap:2px;padding:3px;border-radius:10px;background:var(--ctrl);border:1px solid var(--hair)}
+.seg button{height:26px;padding:0 11px;border-radius:7px;font-size:12px;color:var(--sub);white-space:nowrap}
+.seg button.on{background:var(--chip);color:var(--fg);box-shadow:var(--chipShadow);font-weight:500}
+
+/* ステッパー */
+.step{display:flex;align-items:center;border:1px solid var(--hair);border-radius:10px;height:32px;background:var(--ctrl)}
+.step button{width:30px;height:100%;display:grid;place-items:center;color:var(--sub)}
+.step span{min-width:44px;text-align:center;font-size:12.5px;font-weight:500}
+
+/* スライダー */
+.rng{-webkit-appearance:none;appearance:none;width:100%;height:22px;background:transparent;cursor:pointer;--p:50%}
+.rng::-webkit-slider-runnable-track{height:3px;border-radius:3px;background:linear-gradient(90deg,var(--fg) var(--p),var(--track) var(--p))}
+.rng::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;margin-top:-7.5px;border-radius:50%;background:var(--knob);border:1px solid var(--edge);
+  box-shadow:0 0 0 5px var(--thumbRing),0 2px 6px rgba(0,0,0,.3)}
+.rng::-moz-range-track{height:3px;border-radius:3px;background:var(--track)}
+.rng::-moz-range-progress{height:3px;border-radius:3px;background:var(--fg)}
+.rng::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:var(--knob);border:1px solid var(--edge)}
+
+/* ---- DPI ---- */
+.g-dpi{display:grid;grid-template-columns:1.55fr 1fr;gap:14px;height:100%}
+.col{display:flex;flex-direction:column;gap:14px;min-height:0}
+.readout{display:flex;align-items:baseline;gap:12px;margin:34px 0 10px}
+.readout span{font-size:136px;font-weight:200;letter-spacing:-.05em;line-height:.9}
+.readout em{font-style:normal;font-size:13px;letter-spacing:.16em;color:var(--sub)}
+.readout .xy{margin-left:auto;font-size:12px;color:var(--faint);letter-spacing:0}
+.scale{position:relative;height:16px;margin:2px 9px 0;font-size:10.5px;color:var(--faint)}
+.scale span{position:absolute;transform:translateX(-50%)}
+.scale span::before{content:"";position:absolute;left:50%;top:-8px;width:1px;height:5px;background:var(--hair)}
+.stages{display:grid;grid-template-columns:repeat(5,1fr) 56px;gap:8px;margin-top:auto;padding-top:22px}
+.st{position:relative;height:150px;border-radius:12px;overflow:hidden;padding:10px 12px;display:flex;flex-direction:column;justify-content:space-between;
+  background:var(--ctrl);border:1px solid var(--hair);transition:background .15s}
+.st:hover{background:var(--ctrlHover)}
+.st-f{position:absolute;left:0;right:0;bottom:0;background:var(--fill);transition:height .25s cubic-bezier(.3,.7,.2,1)}
+.st-i,.st-v{position:relative}
+.st-i{font-size:10.5px;letter-spacing:.12em;color:var(--faint)}
+.st-v{font-size:20px;font-weight:300;letter-spacing:-.02em}
+.st.on{background:var(--inv);color:var(--invFg);border-color:transparent}
+.st.on .st-i{color:inherit;opacity:.55}
+.st.on .st-f{background:var(--invFill)}
+.st.add{display:grid;place-items:center;border-style:dashed;background:transparent;color:var(--faint);font-size:20px;font-weight:200}
+.hint{display:flex;gap:16px;margin-top:16px;font-size:11.5px;color:var(--faint)}
+.hint kbd{margin:0 4px 0 0}
+
+/* ---- 性能 ---- */
+.g-perf{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto;align-content:start;gap:14px;height:100%}
+.g-perf .wide{grid-column:1 / -1}
+.poll{display:flex;align-items:flex-end;gap:16px;margin-top:10px}
+.pbars{display:flex;align-items:flex-end;gap:8px;flex:1}
+.pb{flex:1;display:flex;flex-direction:column;align-items:stretch;gap:8px}
+.pb i{display:block;border-radius:8px;background:var(--ctrl);border:1px solid var(--hair);transition:background .15s}
+.pb.le i{background:var(--fill)}
+.pb.on i{background:var(--inv);border-color:transparent}
+.pb span{font-size:11.5px;text-align:center;color:var(--sub)}
+.pb.on span{color:var(--fg);font-weight:600}
+.live{width:250px;flex:none;padding-left:22px;border-left:1px solid var(--hair)}
+.live .v{font-size:46px;font-weight:200;letter-spacing:-.04em;line-height:1}
+.live .v small{font-size:12px;letter-spacing:.12em;color:var(--sub);margin-left:6px}
+.live svg{display:block;margin-top:10px}
+.srow{padding:12px 0 4px;border-top:1px solid var(--hair)}
+.ch + .srow{border-top:0}
+.srow-h{display:flex;justify-content:space-between;align-items:baseline}
+.srow-h b{font-weight:500}
+.srow-h span{font-size:12.5px;font-weight:500}
+
+/* ---- ホーム ---- */
+.g-home{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr auto;gap:14px;height:100%}
+.dc{display:grid;grid-template-columns:150px 1fr;gap:18px;padding:18px 20px;text-align:left;transition:transform .2s}
+.dc:hover{transform:translateY(-2px)}
+.dc-art{display:grid;place-items:center;border-radius:12px;background:var(--ctrl);border:1px solid var(--hair);color:var(--fg)}
+.dc-b{display:flex;flex-direction:column;min-width:0}
+.dc-b .k{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.dc-b .n{font-size:22px;font-weight:300;letter-spacing:-.02em;margin-top:4px;line-height:1.15}
+.dc-b .c{font-size:12px;color:var(--sub);margin-top:4px}
+.dc-f{margin-top:auto;display:flex;align-items:center;justify-content:space-between;padding-top:12px;border-top:1px solid var(--hair);font-size:12px;color:var(--sub)}
+.dc-f .go{display:flex;align-items:center;gap:6px;color:var(--fg);font-weight:500}
+.banner{grid-column:1 / -1;display:flex;align-items:center;gap:16px;padding:14px 16px 14px 20px}
+.banner .ic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;border:1px solid var(--hair);background:var(--ctrl)}
+.banner b{font-weight:500}
+.banner small{display:block;color:var(--faint);font-size:11.5px}
+
+.empty{height:100%;display:grid;place-items:center;text-align:center;color:var(--faint);font-size:12.5px}
+.empty b{display:block;font-size:22px;font-weight:300;color:var(--sub);margin-bottom:6px;letter-spacing:-.02em}
+
+/* ステータスバー */
+.status{display:flex;align-items:center;gap:12px;height:42px;border-top:1px solid var(--hair);font-size:11.5px;color:var(--sub)}
+.status .sep{width:1px;height:12px;background:var(--hair)}
+.status .grow{flex:1}
+</style>
+</head>
+<body>
+<div class="bar">
+  <h2>Frost Graphite</h2><span class="tag">モック B</span>
+  <div class="grow"></div>
+  <div class="mseg" id="mode">
+    <button data-m="compare">比較</button><button data-m="dark">ダーク</button><button data-m="light">ライト</button>
+  </div>
+</div>
+<div class="stage" id="stage"></div>
+<section class="tokens" id="tokens"></section>
+
+<script>
+/* ===================== トークン (theme.rs の Pal に対応させる想定) ===================== */
+const TOKENS = {
+  dark: {
+    bg:'#09090a', frame:'rgba(255,255,255,.08)',
+    fg:'#f4f4f5', sub:'rgba(244,244,245,.62)', faint:'rgba(244,244,245,.36)',
+    glass:'rgba(20,20,22,.44)', edge:'rgba(255,255,255,.09)', rim:'rgba(255,255,255,.16)', inner:'rgba(255,255,255,.02)',
+    hair:'rgba(255,255,255,.08)', ctrl:'rgba(255,255,255,.05)', ctrlHover:'rgba(255,255,255,.09)',
+    track:'rgba(255,255,255,.16)', fill:'rgba(255,255,255,.12)', knob:'#e9e9eb',
+    chip:'rgba(255,255,255,.14)', chipShadow:'inset 0 1px 0 rgba(255,255,255,.12), 0 2px 6px rgba(0,0,0,.35)',
+    sel:'rgba(255,255,255,.08)', selShadow:'inset 0 1px 0 rgba(255,255,255,.08)',
+    inv:'#f4f4f5', invFg:'#0a0a0b', invFill:'rgba(0,0,0,.08)', thumbRing:'rgba(255,255,255,.08)',
+    shadow:'rgba(0,0,0,.55)', grain:'.11',
+    glow:'rgba(255,255,255,.13)', sHi:'#f6f6f7', sMid:'#55555b', sLo:'#0c0c0d', ring:'rgba(255,255,255,.16)', beam:'rgba(255,255,255,.07)',
+  },
+  light: {
+    bg:'#e9eaed', frame:'rgba(0,0,0,.10)',
+    fg:'#0b0b0c', sub:'rgba(11,11,12,.60)', faint:'rgba(11,11,12,.38)',
+    glass:'rgba(255,255,255,.50)', edge:'rgba(0,0,0,.06)', rim:'rgba(255,255,255,.95)', inner:'rgba(255,255,255,.25)',
+    hair:'rgba(0,0,0,.075)', ctrl:'rgba(0,0,0,.035)', ctrlHover:'rgba(0,0,0,.065)',
+    track:'rgba(0,0,0,.13)', fill:'rgba(0,0,0,.07)', knob:'#ffffff',
+    chip:'#ffffff', chipShadow:'0 1px 2px rgba(0,0,0,.10), 0 2px 8px rgba(0,0,0,.06)',
+    sel:'rgba(255,255,255,.78)', selShadow:'0 1px 2px rgba(0,0,0,.06), 0 6px 16px -8px rgba(0,0,0,.18)',
+    inv:'#0b0b0c', invFg:'#ffffff', invFill:'rgba(255,255,255,.10)', thumbRing:'rgba(0,0,0,.05)',
+    shadow:'rgba(40,42,52,.22)', grain:'.20',
+    glow:'rgba(255,255,255,.95)', sHi:'#ffffff', sMid:'#b4b6bd', sLo:'#5d5f67', ring:'rgba(0,0,0,.12)', beam:'rgba(255,255,255,.8)',
+  }
+};
+
+/* ===================== デモデータ ===================== */
+const DEVICES = [
+  {id:'hts',  kind:'mouse',    k:'マウス',      name:'HTS Plus Pro',        conn:'2.4GHz ドングル', bat:82, fw:'1.08', st:'ok'},
+  {id:'atk',  kind:'mouse',    k:'マウス',      name:'ATK F1 V3 ULTIMATE+', conn:'有線',            bat:64, fw:'1.33', st:'busy', charging:true},
+  {id:'su66', kind:'keyboard', k:'キーボード',  name:'SU66 Max',            conn:'有線',            bat:null, fw:'2.10', st:'ok'},
+  {id:'tp55', kind:'dac',      k:'USB DAC',     name:'TP55',                conn:'USB',             bat:null, fw:'0.9', st:'idle'},
+];
+const TABS = {
+  mouse:['DPI','ボタン','性能','マクロ','テスト','一般'],
+  keyboard:['キー割り当て','トリガー','高度キー','ライティング','マクロ','一般'],
+  dac:['EQ','一般'],
+};
+const POLL = [125,250,500,1000,2000,4000,8000];
+const DMIN = 100, DMAX = 6400;
+
+const S = {
+  mode:'compare', page:'dev', dev:'hts', tab:'DPI',
+  stages:[400,800,1600,3200,6400], stage:2, xy:false,
+  lod:'1', tog:{xy:false, motion:true, angle:false, ripple:false, comp:true, long:false},
+  angle:0, poll:6, dp:{press:2, release:4, wheel:8}, sleep:'2分', dpiMode:'順送り',
+};
+
+/* ===================== アイコン ===================== */
+const I = {
+  mouse:(s=18)=>`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 3v6"/></svg>`,
+  keyboard:(s=18)=>`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M7 14h10"/></svg>`,
+  dac:(s=18)=>`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="7" width="16" height="10" rx="3"/><circle cx="9" cy="12" r="2"/><path d="M15 12h2"/></svg>`,
+  home:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>`,
+  gear:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>`,
+  sun:`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>`,
+  moon:`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></svg>`,
+  search:`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg>`,
+  chev:`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>`,
+  arrow:`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>`,
+  more:`<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>`,
+  dl:`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>`,
+  min:`<svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor"><path d="M0 5h10"/></svg>`,
+  max:`<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="9" height="9"/></svg>`,
+  x:`<svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor"><path d="M0 0l10 10M10 0L0 10"/></svg>`,
+};
+const ART = {
+  mouse:`<svg width="74" height="118" viewBox="0 0 74 118" fill="none" stroke="currentColor" stroke-width="1.3">
+    <path d="M37 2C14 2 3 20 3 46v30c0 24 14 40 34 40s34-16 34-40V46C71 20 60 2 37 2z" opacity=".9"/>
+    <path d="M37 2v40M3 42c12 5 22 6 34 6s22-1 34-6" opacity=".5"/>
+    <rect x="33.5" y="14" width="7" height="16" rx="3.5"/><path d="M5 62c3 0 5 2 5 5v8" opacity=".35"/></svg>`,
+  keyboard:(()=>{let k='';for(let r=0;r<4;r++)for(let c=0;c<11;c++){if(r===3&&c>2&&c<8){if(c===3)k+=`<rect x="${8+c*13}" y="${8+r*13}" width="62" height="10" rx="2"/>`;continue}k+=`<rect x="${8+c*13}" y="${8+r*13}" width="10" height="10" rx="2" opacity="${r===0&&c===0?1:.55}"/>`}
+    return `<svg width="124" height="53" viewBox="0 0 160 68" fill="none" stroke="currentColor" stroke-width="1"><rect x="1" y="1" width="158" height="66" rx="9" stroke-width="1.3"/>${k}</svg>`})(),
+  dac:`<svg width="120" height="80" viewBox="0 0 120 80" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="8" y="22" width="76" height="40" rx="12"/><circle cx="34" cy="42" r="9"/><circle cx="34" cy="42" r="3" opacity=".5"/><circle cx="64" cy="42" r="2.5"/><path d="M84 42h10c10 0 14-6 14-16V6" opacity=".6"/></svg>`,
+};
+
+/* ===================== 部品 ===================== */
+const tg  = (key)=>`<button class="tg ${S.tog[key]?'on':''}" data-act="tog" data-k="${key}"></button>`;
+const seg = (key, opts)=>`<div class="seg">${opts.map(o=>`<button class="${S[key]===o?'on':''}" data-act="seg" data-k="${key}" data-v="${o}">${o}</button>`).join('')}</div>`;
+const pct = (v,a,b)=>((v-a)/(b-a)*100).toFixed(2)+'%';
+const bat = (n)=>`<span class="bat-s">${Array.from({length:10},(_,i)=>`<i class="${i<Math.round(n/10)?'f':''}"></i>`).join('')}</span>`;
+const fmt = (n)=>n.toLocaleString('en-US');
+
+function sidebar(theme){
+  return `<aside class="side glass">
+    <button class="nav ${S.page==='home'?'on':''}" data-act="home">${I.home}ホーム</button>
+    <div class="sh"><span>デバイス</span><span>${DEVICES.length}</span></div>
+    ${DEVICES.map(d=>`<button class="dev ${S.page==='dev'&&S.dev===d.id?'on':''}" data-act="dev" data-id="${d.id}">
+      <span class="dev-ic">${I[d.kind]()}</span>
+      <span><b>${d.name}</b><small>${d.conn}${d.bat!=null?` · ${d.bat}%`:''}</small></span>
+      <span class="dot ${d.st==='ok'?'':d.st}"></span></button>`).join('')}
+    <div class="side-foot">
+      <button class="nav">${I.gear}アプリ設定</button>
+      <div class="tsw">
+        <button class="${theme==='light'?'on':''}" data-act="theme" data-v="light">${I.sun}ライト</button>
+        <button class="${theme==='dark'?'on':''}" data-act="theme" data-v="dark">${I.moon}ダーク</button>
+      </div>
+    </div>
+  </aside>`;
+}
+
+function statusbar(){
+  return `<footer class="status"><span class="dot"></span>変更はデバイスに保存済み<span class="sep"></span>最終同期 12:04
+    <span class="grow"></span><button class="btn ghost sm">元に戻す <kbd>Ctrl Z</kbd></button></footer>`;
+}
+
+function home(){
+  const d0 = DEVICES;
+  return `<header class="dh"><div><div class="eyebrow">${d0.length} 台接続中<i></i>11月26日 木曜日</div><h1>デバイス</h1></div>
+    <div class="dh-r"><button class="btn ghost">プリセット</button><button class="btn pri">デバイスを追加</button></div></header>
+    <section class="content" style="padding-top:4px"><div class="g-home">
+      ${d0.map(d=>`<button class="glass dc" data-act="dev" data-id="${d.id}">
+        <span class="dc-art">${ART[d.kind]}</span>
+        <span class="dc-b"><span class="k">${d.k}</span><span class="n">${d.name}</span><span class="c">${d.conn} · FW ${d.fw}</span>
+          <span class="dc-f">${d.bat!=null?`<span style="display:flex;gap:8px;align-items:center">${bat(d.bat)}${d.bat}%${d.charging?' · 充電中':''}</span>`:'<span>USB 給電</span>'}
+          <span class="go">開く ${I.arrow}</span></span></span></button>`).join('')}
+      <div class="glass banner"><span class="ic">${I.dl}</span>
+        <div><b>ATK F1 V3 ULTIMATE+ にファームウェア更新があります</b><small>1.33 → 1.35 · 有線接続のまま約 40 秒</small></div>
+        <span class="grow"></span><button class="btn ghost sm">後で</button><button class="btn pri sm">更新する</button></div>
+    </div></section>`;
+}
+
+function dpiPage(){
+  const v = S.stages[S.stage];
+  const ticks = [100,1600,3200,4800,6400];
+  return `<div class="g-dpi">
+    <div class="glass card" style="display:flex;flex-direction:column">
+      <div class="ch"><span class="lbl">感度</span><span class="grow"></span><span class="meta">X/Y 個別</span>${tg('xy')}</div>
+      <div class="readout"><span data-readout>${fmt(v)}</span><em>DPI</em><span class="xy">ステージ ${S.stage+1} / ${S.stages.length}</span></div>
+      <input type="range" class="rng" min="${DMIN}" max="${DMAX}" step="50" value="${v}" data-rng="dpi" style="--p:${pct(v,DMIN,DMAX)}">
+      <div class="scale">${ticks.map(t=>`<span style="left:${pct(t,DMIN,DMAX)}">${fmt(t)}</span>`).join('')}</div>
+      <div class="stages">
+        ${S.stages.map((s,i)=>`<button class="st ${i===S.stage?'on':''}" data-act="stage" data-i="${i}">
+          <span class="st-f" data-stf="${i}" style="height:${pct(s,0,DMAX)}"></span>
+          <span class="st-i">0${i+1}</span><span class="st-v" data-stv="${i}">${fmt(s)}</span></button>`).join('')}
+        <button class="st add">+</button>
+      </div>
+      <div class="hint"><span><kbd>←</kbd><kbd>→</kbd>ステージ切替</span><span><kbd>Shift</kbd>ドラッグで 10 刻み</span></div>
+    </div>
+    <div class="col">
+      <div class="glass card">
+        <div class="ch"><span class="lbl">センサー</span></div>
+        <div class="row"><div><b>リフトオフ距離</b><small>マウスを持ち上げて反応が止まる高さ</small></div>${seg('lod',['0.7','1','2'])}</div>
+        <div class="row"><div><b>モーション同期</b><small>レポートをセンサーの読み取りに合わせる</small></div>${tg('motion')}</div>
+        <div class="row"><div><b>直線補正</b></div>${tg('angle')}</div>
+        <div class="row"><div><b>リップル制御</b></div>${tg('ripple')}</div>
+        <div class="row"><div><b>センサー角度</b></div><div class="step"><button data-act="ang" data-d="-1">−</button><span>${S.angle}°</span><button data-act="ang" data-d="1">+</button></div></div>
+      </div>
+      <div class="glass card">
+        <div class="ch"><span class="lbl">DPI ボタン</span></div>
+        <div class="row"><div><b>切り替え方</b></div>${seg('dpiMode',['順送り','往復'])}</div>
+      </div>
+    </div></div>`;
+}
+
+function perfPage(){
+  const p = S.poll;
+  const slider = (k,label,max)=>`<div class="srow"><div class="srow-h"><b>${label}</b><span data-sv="${k}">${S.dp[k]} ms</span></div>
+    <input type="range" class="rng" min="0" max="${max}" value="${S.dp[k]}" data-rng="${k}" style="--p:${pct(S.dp[k],0,max)}"></div>`;
+  return `<div class="g-perf">
+    <div class="glass card wide">
+      <div class="ch"><span class="lbl">ポーリングレート</span><span class="grow"></span><span class="meta">8000 Hz では CPU 負荷が上がります</span></div>
+      <div class="poll"><div class="pbars">
+        ${POLL.map((r,i)=>`<button class="pb ${i===p?'on':i<p?'le':''}" data-act="poll" data-i="${i}"><i style="height:${26+i*13}px"></i><span>${r>=1000?r/1000+'K':r}</span></button>`).join('')}
+      </div>
+      <div class="live"><div class="lbl">実測 (USBPcap)</div><div class="v"><span data-live>${fmt(POLL[p])}</span><small>HZ</small></div>
+        <svg width="228" height="38" viewBox="0 0 228 38"><polyline data-spark fill="none" stroke="currentColor" stroke-width="1.3" points=""/></svg></div></div>
+    </div>
+    <div class="glass card">
+      <div class="ch"><span class="lbl">デバウンス</span></div>
+      ${slider('press','押下',20)}${slider('release','解放',20)}${slider('wheel','ホイール',30)}
+    </div>
+    <div class="glass card">
+      <div class="ch"><span class="lbl">電源とモード</span></div>
+      <div class="row"><div><b>スリープまで</b></div>${seg('sleep',['30秒','1分','2分','5分','10分'])}</div>
+      <div class="row"><div><b>競技モード</b><small>LED を消して応答を優先</small></div>${tg('comp')}</div>
+      <div class="row"><div><b>長距離モード</b><small>ドングルから離れて使うとき</small></div>${tg('long')}</div>
+    </div></div>`;
+}
+
+function device(){
+  const d = DEVICES.find(x=>x.id===S.dev);
+  const tabs = TABS[d.kind];
+  if(!tabs.includes(S.tab)) S.tab = tabs[0];
+  let body;
+  if(S.tab==='DPI') body = dpiPage();
+  else if(S.tab==='性能') body = perfPage();
+  else body = `<div class="glass empty"><div><b>${S.tab}</b>このモックでは省略しています</div></div>`;
+  return `<header class="dh"><div><div class="eyebrow">${d.k}<i></i>${d.conn}<i></i>FW ${d.fw}</div><h1>${d.name}</h1></div>
+    <div class="dh-r">${d.bat!=null?`<span class="bat">${bat(d.bat)}${d.bat}%</span>`:''}
+      <button class="btn ghost">プロファイル 1 ${I.chev}</button><button class="btn ghost sq">${I.more}</button></div></header>
+    <nav class="tabs">${tabs.map(t=>`<button class="tab ${t===S.tab?'on':''}" data-act="tab" data-v="${t}">${t}</button>`).join('')}</nav>
+    <section class="content">${body}</section>`;
+}
+
+function win(theme){
+  const vars = Object.entries(TOKENS[theme]).map(([k,v])=>`--${k}:${v}`).join(';');
+  return `<div class="win" style="${vars}">
+    <div class="wall"><i class="glow"></i><i class="r2"></i><i class="r1"></i><i class="s1"></i><i class="s2"></i><i class="s3"></i><i class="beam"></i></div>
+    <div class="tb"><div class="brand"><span class="mark"></span>Device HUB</div>
+      <div class="cmd">${I.search}デバイス・設定・コマンドを検索<kbd>Ctrl K</kbd></div>
+      <span class="grow"></span><div class="wc"><span>${I.min}</span><span>${I.max}</span><span>${I.x}</span></div></div>
+    <div class="lay">${sidebar(theme)}<main class="main">${S.page==='home'?home():device()}${statusbar()}</main></div>
+  </div>`;
+}
+
+/* ===================== 描画とレイアウト ===================== */
+let panes = [];
+function render(){
+  panes = S.mode==='compare' ? [{t:S.left||'dark',label:'Dark'},{t:S.right||'light',label:'Light'}] : [{t:S.mode,label:''}];
+  const st = document.getElementById('stage');
+  st.innerHTML = panes.map((p,i)=>`<div class="pane">${p.label?`<div class="pane-label">${p.label}</div>`:''}<div class="fit" data-pane="${i}">${win(p.t)}</div></div>`).join('');
+  document.querySelectorAll('#mode button').forEach(b=>b.classList.toggle('on',b.dataset.m===S.mode));
+  fit(); spark();
+}
+function fit(){
+  const n = panes.length, W = 1320, H = 840;
+  const aw = (innerWidth - 48 - (n-1)*24)/n;
+  const ah = innerHeight - 52 - 44 - (n>1?24:0);
+  const sc = Math.min(aw/W, n>1 ? 1 : ah/H, 1);
+  document.querySelectorAll('.fit').forEach(f=>{
+    f.style.width = W*sc+'px'; f.style.height = H*sc+'px';
+    f.firstElementChild.style.transform = `scale(${sc})`;
+  });
+}
+addEventListener('resize', fit);
+
+document.getElementById('mode').addEventListener('click', e=>{
+  const b = e.target.closest('button'); if(!b) return; S.mode = b.dataset.m; render();
+});
+
+document.getElementById('stage').addEventListener('click', e=>{
+  const a = e.target.closest('[data-act]'); if(!a) return;
+  const d = a.dataset;
+  switch(d.act){
+    case 'home': S.page='home'; break;
+    case 'dev': S.page='dev'; S.dev=d.id; break;
+    case 'tab': S.tab=d.v; break;
+    case 'stage': S.stage=+d.i; break;
+    case 'tog': S.tog[d.k]=!S.tog[d.k]; break;
+    case 'seg': S[d.k]=d.v; break;
+    case 'poll': S.poll=+d.i; break;
+    case 'ang': S.angle=Math.max(-30,Math.min(30,S.angle+5*d.d)); break;
+    case 'theme': {
+      const i = +a.closest('.fit').dataset.pane;
+      if(S.mode==='compare'){ if(i===0) S.left=d.v; else S.right=d.v; }
+      else S.mode=d.v;
+      break;
+    }
+    default: return;
+  }
+  render();
+});
+
+/* スライダーはドラッグ中に再描画しない — 全ペインの該当要素だけ書き換える */
+document.getElementById('stage').addEventListener('input', e=>{
+  const r = e.target.closest('[data-rng]'); if(!r) return;
+  const k = r.dataset.rng, v = +r.value;
+  if(k==='dpi'){
+    S.stages[S.stage] = v;
+    document.querySelectorAll('[data-rng="dpi"]').forEach(x=>{ if(x!==r) x.value=v; x.style.setProperty('--p',pct(v,DMIN,DMAX)); });
+    document.querySelectorAll('[data-readout]').forEach(x=>x.textContent=fmt(v));
+    document.querySelectorAll(`[data-stv="${S.stage}"]`).forEach(x=>x.textContent=fmt(v));
+    document.querySelectorAll(`[data-stf="${S.stage}"]`).forEach(x=>x.style.height=pct(v,0,DMAX));
+  } else {
+    S.dp[k] = v; const max = +r.max;
+    document.querySelectorAll(`[data-rng="${k}"]`).forEach(x=>{ if(x!==r) x.value=v; x.style.setProperty('--p',pct(v,0,max)); });
+    document.querySelectorAll(`[data-sv="${k}"]`).forEach(x=>x.textContent=v+' ms');
+  }
+});
+
+/* 実測ポーリングの擬似ライブ表示 */
+let hist = Array.from({length:60},()=>Math.round(8000*(0.985+Math.random()*0.015)));
+function spark(){
+  const lines = document.querySelectorAll('[data-spark]'); if(!lines.length) return;
+  const target = POLL[S.poll];
+  const pts = hist.map((h,i)=>`${(i*228/59).toFixed(1)},${(34 - (h/target)*26).toFixed(1)}`).join(' ');
+  lines.forEach(l=>l.setAttribute('points',pts));
+  const last = hist[hist.length-1]; if(last) document.querySelectorAll('[data-live]').forEach(x=>x.textContent=fmt(last));
+}
+setInterval(()=>{
+  const t = POLL[S.poll];
+  const v = Math.round(t * (0.985 + Math.random()*0.017));
+  hist.push(Math.min(v,t+2)); if(hist.length>60) hist.shift();
+  spark();
+}, 250);
+
+/* トークン表 */
+(function tokens(){
+  const keys = ['bg','fg','sub','faint','glass','edge','rim','hair','ctrl','track','fill','chip','sel','inv','invFg','shadow','grain'];
+  const cell = v => /^(#|rgba)/.test(v) ? `<span class="sw"><i style="background:${v}"></i></span><code>${v}</code>` : `<code>${v}</code>`;
+  document.getElementById('tokens').innerHTML = `<h3>トークン</h3>
+    <p>theme.rs の Pal に移すときの対応表。ガラスは blur 34px / saturate 130% + 上端リム (inset 1px) + 粒子 (grain の不透明度で overlay)。反転色 inv/invFg は「選択中の値」と主ボタンだけに使う。</p>
+    <table><tr><th>トークン</th><th>ダーク</th><th>ライト</th></tr>
+    ${keys.map(k=>`<tr><td><code>${k}</code></td><td>${cell(TOKENS.dark[k])}</td><td>${cell(TOKENS.light[k])}</td></tr>`).join('')}</table>`;
+})();
+
+/* ?mode=dark&page=home&tab=性能 で初期状態を指定 (スクリーンショット用) */
+const q = new URLSearchParams(location.search || location.hash.slice(1));
+if(q.get('mode')) S.mode = q.get('mode');
+if(q.get('page')) S.page = q.get('page');
+if(q.get('tab'))  S.tab  = q.get('tab');
+if(q.get('dev'))  S.dev  = q.get('dev');
+render();
+</script>
+</body>
+</html>

@@ -48,6 +48,18 @@ impl Shell {
             ui::body()
                 .pb(px(12.))
                 .child(ui::row_first(
+                    "デザイン",
+                    None,
+                    ui::segmented(
+                        "theme-family",
+                        &["Liquid Glass".into(), "Frost Graphite".into()],
+                        theme::theme_family_index(),
+                        cx,
+                        |this, i, cx| this.set_theme_family(theme::THEME_FAMILIES[i].0, cx),
+                    )
+                    .w(px(270.)),
+                ))
+                .child(ui::row(
                     "テーマ",
                     None,
                     ui::segmented(
@@ -59,7 +71,9 @@ impl Shell {
                     )
                     .w(px(200.)),
                 ))
-                .child(ui::row("アクセントカラー", None, accents))
+                .when(!theme::is_graphite(), |d| {
+                    d.child(ui::row("アクセントカラー", None, accents))
+                })
                 .child(ui::row(
                     "フォント",
                     Some("Geist / IBM Plex Sans JP / Zen Maru Gothic は同梱。他は未インストール時にフォールバック"),
@@ -117,7 +131,13 @@ impl Shell {
                     "壁紙",
                     Some(match &wall {
                         Some(w) => w.as_str(),
-                        None => "オーロラ (自動生成)",
+                        None => {
+                        if theme::is_graphite() {
+                            "モノクロ (自動生成)"
+                        } else {
+                            "オーロラ (自動生成)"
+                        }
+                    }
                     }),
                     div()
                         .flex()
@@ -273,7 +293,7 @@ impl Shell {
         div()
             .id("settings-scroll")
             .size_full()
-            .overflow_y_scroll()
+            .overflow_y_scroll().smooth_wheel()
             .child(
                 div()
                     .flex()
