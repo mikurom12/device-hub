@@ -148,6 +148,24 @@ impl<I: Io> LogitechDriver<I> {
         op(&mut s).map_err(map_err)
     }
 
+    /// 書込み後の読み戻し。無線 (受信機経由) では反映まで少し掛かることがあるので、
+    /// 一致するまで最大 ~0.6 秒 (100ms 間隔) 待つ。
+    fn confirm<T: PartialEq + Copy>(
+        &self,
+        want: T,
+        read: impl Fn(&mut Session<I>) -> Result<T, HErr>,
+    ) -> HubResult<T> {
+        let mut got = self.with(|s| read(s))?;
+        for _ in 0..6 {
+            if got == want {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+            got = self.with(|s| read(s))?;
+        }
+        Ok(got)
+    }
+
     // ---- 再接続時の再適用 (G HUB の「常駐して設定を保つ」相当)
 
     fn save(&self, key: &str, value: u32) {
@@ -306,11 +324,12 @@ impl<I: Io + 'static> DeviceDriver for LogitechDriver<I> {
                 self.with(|s| f::set_dpi(s, 0, dpi))?;
                 // 受理されたか読み戻す。オンボードモードだと無視される機器があるため、
                 // 黙って失敗させずトーストで知らせる。
-                let got = self.with(|s| f::get_dpi(s, 0))?;
+                let got = self.confirm(dpi, |s| f::get_dpi(s, 0))?;
                 if got != dpi {
                     return Err(HubError::Protocol(format!(
                         "DPI が反映されません (要求 {dpi} / 実際 {got})。\
-                         「設定の保持先」をホストにすると効く場合があります"
+                         G HUB が動いていると上書きされます (G HUB を終了して再試行)。\
+                         それでも効かなければ「設定の保持先」を切り替えてください"
                     )));
                 }
                 self.save("dpi", dpi as u32);
@@ -326,10 +345,11 @@ impl<I: Io + 'static> DeviceDriver for LogitechDriver<I> {
                     return Err(HubError::Invalid(format!("{hz} Hz is not supported")));
                 }
                 self.with(|s| f::set_report_rate(s, hz))?;
-                let got = self.with(|s| f::report_rate(s))?;
+                let got = self.confirm(hz, |s| f::report_rate(s))?;
                 if got != hz {
                     return Err(HubError::Protocol(format!(
-                        "ポーリングレートが反映されません (要求 {hz} / 実際 {got})"
+                        "ポーリングレートが反映されません (要求 {hz} / 実際 {got})。\
+                         G HUB が動いていると上書きされます (G HUB を終了して再試行)"
                     )));
                 }
                 self.save("rate_hz", hz);
