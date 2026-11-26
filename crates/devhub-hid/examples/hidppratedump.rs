@@ -24,6 +24,20 @@ fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect::<Vec<_>>().join(" ")
 }
 
+/// f2 を 引数なし と conn=0..3 の全部で読んで1行に並べる。
+fn f2_all(s: &mut Session<HidIo>, tag: &str) {
+    let mut out = String::new();
+    let one = |s: &mut Session<HidIo>, p: &[u8]| match s.call(F, 2, p) {
+        Ok(r) => format!("{:02x}", r[0]),
+        Err(_) => "ERR".into(),
+    };
+    out += &format!("[]={} ", one(s, &[]));
+    for c in 0..4u8 {
+        out += &format!("[{c}]={} ", one(s, &[c]));
+    }
+    println!("f2 全枠 {tag:<14} -> {out}");
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let mut set: Option<u8> = None;
@@ -73,6 +87,7 @@ fn main() {
         }
         show(&mut s, "f1 rate list []", 1, &[]);
         show(&mut s, "f2 current []", 2, &[]);
+        f2_all(&mut s, "(開始時)");
         if try_all {
             // 引数の形を変えながら f3 を書き、f2 が変わるかを見る (500Hz=2 を狙う。変われば止まる)
             let read = |s: &mut Session<HidIo>, p: &[u8]| s.call(F, 2, p).map(|r| r[0]).ok();
@@ -128,7 +143,7 @@ fn main() {
             show(&mut s, &format!("f3 set [{i}]"), 3, &[i]);
             for ms in [50u64, 200, 600] {
                 std::thread::sleep(Duration::from_millis(ms));
-                show(&mut s, &format!("f2 current (+{ms}ms)"), 2, &[]);
+                f2_all(&mut s, &format!("(+{ms}ms)"));
             }
             if host {
                 // 元のモードへ必ず戻す (戻した後にレートがどうなるかも見る)
