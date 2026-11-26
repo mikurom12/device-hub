@@ -12,6 +12,7 @@ pub const BATTERY_VOLTAGE: u16 = 0x1001;
 pub const UNIFIED_BATTERY: u16 = 0x1004;
 pub const REPROG_CONTROLS_V4: u16 = 0x1B04;
 pub const ADJUSTABLE_DPI: u16 = 0x2201;
+pub const EXTENDED_ADJUSTABLE_DPI: u16 = 0x2202;
 pub const REPORT_RATE: u16 = 0x8060;
 pub const EXTENDED_REPORT_RATE: u16 = 0x8061;
 pub const COLOR_LED_EFFECTS: u16 = 0x8070;
@@ -305,42 +306,93 @@ impl DpiList {
     }
 }
 
-/// AdjustableDpi (0x2201) func1 `[sensor, 0, chunk]` → `[sensor, u16 BE…]`。
-/// 終端 0x0000 が出るまで chunk を進めて読む (最大 8 回)。
-pub fn dpi_list<I: Io>(s: &mut Session<I>, sensor: u8) -> Result<DpiList> {
+/// DPI リストを chunk を進めながら集める。`skip` は応答先頭の読み飛ばしバイト数
+/// (0x2201: sensor の 1 バイト / 0x2202: sensor・方向・chunk の 3 バイト)。
+/// 終端 0x0000 が出るまで (最大 8 回)。
+fn collect_dpi_list<I: Io>(
+    s: &mut Session<I>,
+    feature: u16,
+    function: u8,
+    skip: usize,
+    params: impl Fn(u8) -> Vec<u8>,
+) -> Result<DpiList> {
     let mut bytes = Vec::new();
     for chunk in 0..8u8 {
-        let p = s.call(ADJUSTABLE_DPI, 1, &[sensor, 0, chunk])?;
-        // p[0] = sensor。以降は偶数バイトずつ読む (長さ 15 の端数は捨てる)。
-        let body = &p[1..];
+        let p = s.call(feature, function, &params(chunk))?;
+        let body = p.get(skip..).unwrap_or(&[]);
         let even = body.len() & !1;
         let before = bytes.len();
         bytes.extend_from_slice(&body[..even]);
-        // 終端を見つけたらそこまでで止める。
-        if body[..even].chunks_exact(2).any(|c| c == [0, 0]) {
-            break;
-        }
-        if bytes.len() == before {
+        if body[..even].chunks_exact(2).any(|c| c == [0, 0]) || bytes.len() == before {
             break;
         }
     }
     DpiList::parse(&bytes)
 }
 
-/// AdjustableDpi func2 `[sensor]` → `[sensor, dpi BE, default BE]`。dpi=0 なら default を返す。
+/// ExtendedAdjustableDpi (0x2202) func1 `[0]` → `[.., .., flags]` (bit0=Y 軸あり, bit1=LOD あり)。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExtDpiCaps {
+    pub y: bool,
+    pub lod: bool,
+}
+
+pub fn ext_dpi_caps<I: Io>(s: &mut Session<I>) -> Result<ExtDpiCaps> {
+    let p = s.call(EXTENDED_ADJUSTABLE_DPI, 1, &[0])?;
+    let flags = *p.get(2).ok_or_else(|| Error::Protocol("short ext DPI caps".into()))?;
+    Ok(ExtDpiCaps {
+        y: flags & 1 != 0,
+        lod: flags & 2 != 0,
+    })
+}
+
+/// DPI リスト (X 軸)。AdjustableDpi (0x2201) を優先、無ければ ExtendedAdjustableDpi (0x2202)。
+/// - 0x2201 func1 `[sensor, 0, chunk]` → `[sensor, u16 BE…]`
+/// - 0x2202 func2 `[0, 方向(0=X), chunk]` → `[0, 方向, chunk, u16 BE…]` (Solaar `produce_dpi_list`)
+pub fn dpi_list<I: Io>(s: &mut Session<I>, sensor: u8) -> Result<DpiList> {
+    if s.has(ADJUSTABLE_DPI)? {
+        return collect_dpi_list(s, ADJUSTABLE_DPI, 1, 1, |c| vec![sensor, 0, c]);
+    }
+    if s.has(EXTENDED_ADJUSTABLE_DPI)? {
+        return collect_dpi_list(s, EXTENDED_ADJUSTABLE_DPI, 2, 3, |c| vec![0, 0, c]);
+    }
+    Err(Error::NoFeature(ADJUSTABLE_DPI))
+}
+
+/// 現在の DPI (X 軸)。値が 0 なら既定値を返す。
+/// - 0x2201 func2 `[sensor]` → `[sensor, dpi BE, default BE]`
+/// - 0x2202 func5 `[0]` → `[sensor, X BE, X既定 BE, Y BE, Y既定 BE, LOD]`
 pub fn get_dpi<I: Io>(s: &mut Session<I>, sensor: u8) -> Result<u16> {
-    let p = s.call(ADJUSTABLE_DPI, 2, &[sensor])?;
-    let cur = u16::from_be_bytes([p[1], p[2]]);
+    let (p, at) = if s.has(ADJUSTABLE_DPI)? {
+        (s.call(ADJUSTABLE_DPI, 2, &[sensor])?, 1)
+    } else {
+        (s.call(EXTENDED_ADJUSTABLE_DPI, 5, &[0])?, 1)
+    };
+    if p.len() < at + 4 {
+        return Err(Error::Protocol("short DPI reply".into()));
+    }
+    let cur = u16::from_be_bytes([p[at], p[at + 1]]);
     Ok(if cur == 0 {
-        u16::from_be_bytes([p[3], p[4]])
+        u16::from_be_bytes([p[at + 2], p[at + 3]])
     } else {
         cur
     })
 }
 
-/// AdjustableDpi func3 `[sensor, dpi BE]`。
+/// DPI を設定する。
+/// - 0x2201 func3 `[sensor, dpi BE]`
+/// - 0x2202 func6 `[0, X BE, Y BE, LOD]`。Y 軸があれば X と同じ値 (連動) にし、LOD は現状維持。
 pub fn set_dpi<I: Io>(s: &mut Session<I>, sensor: u8, dpi: u16) -> Result<()> {
-    s.call(ADJUSTABLE_DPI, 3, &[sensor, (dpi >> 8) as u8, dpi as u8])?;
+    if s.has(ADJUSTABLE_DPI)? {
+        s.call(ADJUSTABLE_DPI, 3, &[sensor, (dpi >> 8) as u8, dpi as u8])?;
+        return Ok(());
+    }
+    let caps = ext_dpi_caps(s)?;
+    let cur = s.call(EXTENDED_ADJUSTABLE_DPI, 5, &[0])?;
+    let lod = if caps.lod { cur.get(9).copied().unwrap_or(0) } else { 0 };
+    let (hi, lo) = ((dpi >> 8) as u8, dpi as u8);
+    let (yh, yl) = if caps.y { (hi, lo) } else { (0, 0) };
+    s.call(EXTENDED_ADJUSTABLE_DPI, 6, &[0, hi, lo, yh, yl, lod])?;
     Ok(())
 }
 
@@ -502,6 +554,35 @@ mod tests {
         assert_eq!(l.max(), 44000);
         assert_eq!(get_dpi(&mut s, 0).unwrap(), 1600);
         set_dpi(&mut s, 0, 800).unwrap();
+    }
+
+    #[test]
+    fn extended_dpi_list_get_set_keep_lod_and_link_y() {
+        let writes = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Vec<u8>>::new()));
+        let w = writes.clone();
+        let mut s = device(&[(EXTENDED_ADJUSTABLE_DPI, 11)], move |idx, func, p| {
+            assert_eq!(idx, 11);
+            match func {
+                1 => Some(vec![0, 0, 0x03]), // Y あり・LOD あり
+                2 => {
+                    assert_eq!(&p[..3], &[0, 0, 0]);
+                    // 先頭 3 バイト (sensor, 方向, chunk) + 100, step 50, 44000, 終端
+                    Some(vec![0, 0, 0, 0x00, 0x64, 0xE0, 0x32, 0xAB, 0xE0, 0, 0])
+                }
+                5 => Some(vec![0, 0x06, 0x40, 0x03, 0x20, 0x06, 0x40, 0x03, 0x20, 0x02]),
+                6 => {
+                    w.lock().unwrap().push(p[..6].to_vec());
+                    Some(vec![])
+                }
+                _ => None,
+            }
+        });
+        let l = dpi_list(&mut s, 0).unwrap();
+        assert_eq!((l.min(), l.max(), l.step()), (100, 44000, 50));
+        assert_eq!(get_dpi(&mut s, 0).unwrap(), 1600);
+        set_dpi(&mut s, 0, 800).unwrap();
+        // [sensor, X=800, Y=800, LOD=2 (現状維持)]
+        assert_eq!(writes.lock().unwrap()[0], vec![0, 0x03, 0x20, 0x03, 0x20, 0x02]);
     }
 
     #[test]

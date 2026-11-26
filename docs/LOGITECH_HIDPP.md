@@ -20,9 +20,23 @@ crates/devhub-hid/examples/hidppprobe.rs   読み取り専用の診断ツール
 | 有線 | 046d:c09a | Linux カーネル `hid-logitech-hidpp.c` の PRO 2 LIGHTSPEED 追加パッチ (2025-08) |
 | LIGHTSPEED 受信機 | 046d:c543 | 同 `hid-logitech-dj.c` (`NANO_RECEIVER_LIGHTSPEED_1_2`) |
 
-HID++ の long report (0x11) を運ぶ vendor 定義コレクションの (usage page, usage) は
-**未確認**。registry には `FF00/0002` と `FF43/0202` の 2 候補を載せてある。
-`hidppprobe` で応答した方を残し、もう片方の行を消す。
+### 実機で確認できたこと (2026-11-26、受信機 046d:c543 経由、`hidppprobe` の出力)
+
+- HID++ の IF は **usage page 0xFF00 / usage 0x0002** (long report 0x11)。usage 0x0001 / 0x0004 は書込みが
+  `WriteFile` エラーになり HID++ ではない。FF43/0202 の行は不要なので受信機の分は削除した。
+- デバイス番号は **0x01** (受信機のペア番号)、プロトコルは **4.2**、名前は `PRO 2 LIGHTSPEED`。
+- ファームウェア: MPM 31.04.B0012 / BL1 70.00.B0007。バッテリー: UnifiedBattery (0x1004) で 99%。
+- **DPI は AdjustableDpi (0x2201) ではなく ExtendedAdjustableDpi (0x2202)**。0x2201 は無い。
+  → `features.rs` に 0x2202 を実装済み (func1 能力 / func2 リスト / func5 取得 / func6 設定)。
+  実機での DPI 読み書きは**まだ試していない**。
+- ポーリングは ExtendedReportRate (0x8061)。この接続 (受信機) では 125 / 250 / 500 / 1000 Hz の
+  4 段階だけが報告された (8K は出なかった)。有線では未確認。
+- OnboardProfiles (0x8100) あり。読んだ時点のモードは **Host** (G HUB が設定した状態)。
+- 機能テーブルに ReprogControlsV4 (0x1B04) は**無い**。ボタン割り当ては別経路
+  (おそらくオンボードプロファイル 0x8100) で、まだ解析していない。
+- そのほか RgbEffects 0x8071 / 0x2250 / 0x2251 / 0x8090 / 0x80E0 / 0x8110 / 0x1D4B 等を持つ (未解析)。
+
+有線 (046d:c09a) の usage は未確認。registry には FF00/0002 と FF43/0202 の両方を残してある。
 
 ## 実装したプロトコル (出典: Solaar `hidpp20*.py` / `settings_templates.py`、libratbag `hidpp20.c`)
 
@@ -39,7 +53,8 @@ swid は `0x0D` (Solaar は `0x0B`)。
 | DeviceFwVersion | 0x0003 | f0 count / f1 entry |
 | DeviceName | 0x0005 | f0 len / f1 chunk |
 | UnifiedBattery / BatteryVoltage / BatteryStatus | 0x1004 / 0x1001 / 0x1000 | 順に試す |
-| AdjustableDpi | 0x2201 | f1 list / f2 get / f3 set (リストは `0xE000\|step` + 上限の範囲表現あり) |
+| AdjustableDpi | 0x2201 | f1 list / f2 get / f3 set (リストは `0xE000\|step` + 上限の範囲表現あり)。PRO 2 には無い |
+| ExtendedAdjustableDpi | 0x2202 | f1 caps / f2 list `[0,dir,chunk]` / f5 get / f6 set `[0,X,Y,LOD]` — **PRO 2 はこちら** |
 | ReportRate | 0x8060 | f0 list(ms bitmask) / f1 get / f2 set |
 | ExtendedReportRate | 0x8061 | f1 list(bit i = 125Hz<<i) / f2 get / f3 set — **8K はこちら** |
 | OnboardProfiles | 0x8100 | f1 set mode / f2 get mode (1=Onboard, 2=Host) |
