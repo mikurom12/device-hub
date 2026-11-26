@@ -6,9 +6,16 @@
 //! ```
 //! index: 0=125Hz 1=250Hz 2=500Hz 3=1000Hz (4=2000 5=4000 6=8000)。
 //! `--set` は ReportRate だけを書く (DPI などには触れない)。元に戻すには `--set 3`。
+//!
+//! ```sh
+//! cargo run -p devhub-hid --example hidppratedump -- --set 2 --host
+//! ```
+//! `--host` を付けると、書込み前にホストモード(0x8100 mode=2)へ切り替え、読み戻したあと
+//! 元のモードに必ず戻す。オンボードプロファイルがレートを上書きしている疑いの検証用。
+//! ホストモードの間 (数秒) ボタンやライトの挙動が変わることがある。
 
 use devhub_hid::logitech::HidIo;
-use devhub_hidpp::features::EXTENDED_REPORT_RATE as F;
+use devhub_hidpp::features::{onboard_mode, set_onboard_mode, OnboardMode, EXTENDED_REPORT_RATE as F};
 use devhub_hidpp::{find_device_index, Session};
 use hidapi::HidApi;
 use std::time::Duration;
@@ -20,9 +27,12 @@ fn hex(b: &[u8]) -> String {
 fn main() {
     let mut args = std::env::args().skip(1);
     let mut set: Option<u8> = None;
+    let mut host = false;
     while let Some(a) = args.next() {
         if a == "--set" {
             set = args.next().and_then(|v| v.parse().ok());
+        } else if a == "--host" {
+            host = true;
         }
     }
     let api = HidApi::new().expect("hidapi init");
@@ -60,12 +70,30 @@ fn main() {
         }
         show(&mut s, "f1 rate list []", 1, &[]);
         show(&mut s, "f2 current []", 2, &[]);
+        let orig_mode = onboard_mode(&mut s);
+        println!("onboard mode (現在)          -> {orig_mode:?}");
         if let Some(i) = set {
+            if host {
+                println!("\n-- ホストモードへ切替 --");
+                println!("set_onboard_mode(Host)       -> {:?}", set_onboard_mode(&mut s, OnboardMode::Host));
+                std::thread::sleep(Duration::from_millis(300));
+                println!("onboard mode (切替後)        -> {:?}", onboard_mode(&mut s));
+                show(&mut s, "f2 current (host直後)", 2, &[]);
+            }
             println!("\n-- 書込み: f3 [{i}] --");
             show(&mut s, &format!("f3 set [{i}]"), 3, &[i]);
             for ms in [50u64, 200, 600] {
                 std::thread::sleep(Duration::from_millis(ms));
                 show(&mut s, &format!("f2 current (+{ms}ms)"), 2, &[]);
+            }
+            if host {
+                // 元のモードへ必ず戻す (戻した後にレートがどうなるかも見る)
+                let back = orig_mode.as_ref().ok().copied().unwrap_or(OnboardMode::Onboard);
+                println!("\n-- 元のモードへ復帰 --");
+                println!("set_onboard_mode({back:?})   -> {:?}", set_onboard_mode(&mut s, back));
+                std::thread::sleep(Duration::from_millis(300));
+                println!("onboard mode (復帰後)        -> {:?}", onboard_mode(&mut s));
+                show(&mut s, "f2 current (復帰後)", 2, &[]);
             }
         }
     }
