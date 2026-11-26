@@ -429,7 +429,13 @@ pub fn report_rates<I: Io>(s: &mut Session<I>) -> Result<Vec<u32>> {
 
 pub fn report_rate<I: Io>(s: &mut Session<I>) -> Result<u32> {
     if s.has(EXTENDED_REPORT_RATE)? {
-        let p = s.call(EXTENDED_REPORT_RATE, 2, &[])?;
+        // 実機 (PRO 2 + 2.4GHz 受信機) では f2 が接続種別ごとの枠を持ち、書込み (f3 [idx]) が
+        // 反映されるのは conn=1 の枠だけだった。引数なし / conn=0 は常に 1000Hz のまま。
+        // そのため conn=1 を最優先で読み、読めなければ引数なしにフォールバックする。
+        let p = match s.call(EXTENDED_REPORT_RATE, 2, &[1]) {
+            Ok(p) => p,
+            Err(_) => s.call(EXTENDED_REPORT_RATE, 2, &[])?,
+        };
         return EXT_RATE_HZ
             .get(p[0] as usize)
             .copied()
@@ -638,6 +644,20 @@ mod tests {
         assert_eq!(report_rate(&mut s).unwrap(), 1000);
         set_report_rate(&mut s, 8000).unwrap();
         assert!(set_report_rate(&mut s, 3000).is_err());
+    }
+
+    #[test]
+    fn report_rate_reads_conn1_slot() {
+        // 実機の挙動: 引数なし / conn=0 は 1000Hz 固定、conn=1 が実際の値、conn=2,3 はエラー
+        let mut s = device(&[(EXTENDED_REPORT_RATE, 6)], |_, func, p| match func {
+            2 => match p.first() {
+                Some(1) => Some(vec![2]), // 500Hz
+                Some(2) | Some(3) => None, // エラー
+                _ => Some(vec![3]),
+            },
+            _ => None,
+        });
+        assert_eq!(report_rate(&mut s).unwrap(), 500);
     }
 
     #[test]
