@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 # 同じブランチへの連続 push では古い run を自動キャンセル。
 concurrency:
@@ -19,6 +20,8 @@ jobs:
         run: rustup show
       - name: Check
         run: cargo check --workspace --locked
+      - name: Clippy
+        run: cargo clippy --workspace --locked -- -D warnings
       - name: Test
         run: cargo test --workspace --locked
       - name: Release build

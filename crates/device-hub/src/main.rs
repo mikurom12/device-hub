@@ -22,6 +22,9 @@ use gpui_kit::component::{Theme, ThemeMode, TitleBar};
 use gpui_kit::*;
 
 fn main() {
+    if !device_hub::resident::single_instance() {
+        return;
+    }
     device_hub::rawinput::start(); // 実測ポーリングレート計測 (Raw Input)
     // USB 計測ワーカーの診断ログ — 未設定なら %TEMP% に既定で出す
     // (切断の OS コード採取用。ワーカー遷移のみで容量は微小)。
@@ -39,7 +42,10 @@ fn main() {
         .run(|cx| {
             gpui_kit::init(cx);
             // フォント登録は選択の後 — 使う書体だけ載せて常駐メモリを削る。
-            let prefs = Prefs::load();
+            let mut prefs = Prefs::load();
+            device_hub::resident::init(&mut prefs);
+            let hidden_start = device_hub::resident::started_in_background()
+                && device_hub::resident::tray_active();
             theme::set_font_id(&prefs.font);
             theme::install_fonts(cx);
             let light = prefs.light();
@@ -65,6 +71,10 @@ fn main() {
             // 背面に回ったら描画を間引く (ゲームの邪魔をしない)。
             options.inactive_frame_interval = Some(std::time::Duration::from_millis(250));
             options.app_id = Some("devicehub".into());
+            if hidden_start {
+                options.show = false;
+                options.focus = false;
+            }
             // 窓キャプション — タスクマネージャーと Alt+Tab の表示名になる。
             if let Some(tb) = options.titlebar.as_mut() {
                 tb.title = Some("Device HUB".into());
@@ -76,6 +86,7 @@ fn main() {
             .expect("failed to open window");
             cx.on_window_closed(|cx, _| {
                 if cx.windows().is_empty() {
+                    device_hub::resident::remove_tray();
                     cx.quit();
                 }
             })

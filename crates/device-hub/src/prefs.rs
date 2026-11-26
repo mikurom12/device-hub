@@ -52,6 +52,22 @@ pub struct Prefs {
     /// 再接続・ポート変更でアドレスが変わってもこれで再解決する。
     #[serde(default)]
     pub usb_pick: String,
+    /// × で閉じたとき終了せずトレイに残す (既定 OFF)。
+    #[serde(default)]
+    pub close_to_tray: bool,
+    /// アプリ本体の更新を自動で確認する (1 日 1 回まで)。
+    #[serde(default = "default_true")]
+    pub app_update_check: bool,
+    /// 最後に自動確認した時刻 (UNIX 秒)。
+    #[serde(default)]
+    pub app_update_last: u64,
+    /// Windows 通知を出し済みのバージョン。
+    #[serde(default)]
+    pub app_update_notified: String,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_usb_hub() -> u16 {
@@ -169,6 +185,10 @@ impl Default for Prefs {
             usb_ep: default_usb_ep(),
             usb_report: default_usb_report(),
             usb_pick: String::new(),
+            close_to_tray: false,
+            app_update_check: true,
+            app_update_last: 0,
+            app_update_notified: String::new(),
         }
     }
 }

@@ -1021,12 +1021,16 @@ pub extern "C" fn obs_current_module() -> *mut c_void {
 
 static LOOKUP: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
+/// # Safety
+/// OBS から渡される `key` / `out` は呼び出し側が有効なポインタであること。
 #[no_mangle]
 pub unsafe extern "C" fn obs_module_get_string(key: *const u8, out: *mut *const u8) -> bool {
     let lookup = LOOKUP.load(std::sync::atomic::Ordering::Acquire);
     !lookup.is_null() && ffi::resolve().is_some_and(|api| (api.lookup_string)(lookup, key, out))
 }
 
+/// # Safety
+/// OBS から渡される `locale` は有効な NUL 終端文字列か NULL であること。
 #[no_mangle]
 pub unsafe extern "C" fn obs_module_set_locale(locale: *const u8) {
     if let Some(api) = ffi::resolve() {
@@ -1036,6 +1040,8 @@ pub unsafe extern "C" fn obs_module_set_locale(locale: *const u8) {
     }
 }
 
+/// # Safety
+/// OBS のモジュール解放時にだけ呼ぶこと。
 #[no_mangle]
 pub unsafe extern "C" fn obs_module_free_locale() {
     let old = LOOKUP.swap(std::ptr::null_mut(), std::sync::atomic::Ordering::AcqRel);

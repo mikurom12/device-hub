@@ -280,6 +280,104 @@ impl Shell {
                 )),
         );
 
+        let resident_card = ui::card_titled("常駐・起動", "power", None).child(
+            ui::body()
+                .pb(px(12.))
+                .child(ui::row_first(
+                    "閉じたらトレイに常駐",
+                    Some("× で窓を隠し、自動プロファイルと電池監視を続けます。HID を掴んだままになるため Web 版やベンダーアプリと同時には使わないでください"),
+                    ui::toggle(
+                        "close-to-tray",
+                        self.prefs.close_to_tray,
+                        cx,
+                        |this, on, cx| {
+                            this.prefs.close_to_tray = on;
+                            this.prefs.save();
+                            crate::resident::set_close_to_tray(on);
+                            cx.notify();
+                        },
+                    ),
+                ))
+                .child(ui::row(
+                    "Windows 起動時に開始 (最小化)",
+                    Some("HKCU の Run キーに登録します。OFF にすると同じ値を削除して元に戻ります"),
+                    ui::toggle(
+                        "autostart",
+                        crate::resident::autostart_enabled(),
+                        cx,
+                        |this, on, cx| {
+                            if let Err(e) = crate::resident::set_autostart(on) {
+                                this.toast(e, true, cx);
+                            }
+                            cx.notify();
+                        },
+                    ),
+                ))
+                .child(ui::row(
+                    "トレイアイコン",
+                    Some("クリックで開く / 右クリックで終了。接続中デバイスの電池残量をツールチップに表示します"),
+                    ui::faint(if crate::resident::tray_active() { "常駐中" } else { "利用できません" }),
+                )),
+        );
+
+        let upd = self.app_update.clone();
+        let upd_busy = self.app_update_busy;
+        let mut upd_body = ui::body()
+            .pb(px(12.))
+            .child(ui::row_first(
+                "自動で確認",
+                Some("1 日 1 回まで GitHub Releases を確認します。ダウンロードやインストールはしません"),
+                ui::toggle(
+                    "app-update-auto",
+                    self.prefs.app_update_check,
+                    cx,
+                    |this, on, cx| {
+                        this.prefs.app_update_check = on;
+                        this.prefs.save();
+                        cx.notify();
+                    },
+                ),
+            ))
+            .child(ui::row(
+                "今すぐ確認",
+                Some(if upd_busy { "確認しています…" } else { "GitHub の最新リリースと比較します" }),
+                ui::button(
+                    "app-update-now",
+                    if upd_busy { "確認中…" } else { "確認" },
+                    Some("refresh-cw"),
+                    Btn::Glass,
+                    cx,
+                    |this, _, cx| this.check_app_update(true, cx),
+                ),
+            ));
+        if let Some(u) = upd {
+            let url = u.url.clone();
+            let status = if u.newer {
+                format!("新しい v{} があります (現在 v{})", u.latest, env!("CARGO_PKG_VERSION"))
+            } else {
+                format!("最新版です (v{})", env!("CARGO_PKG_VERSION"))
+            };
+            upd_body = upd_body.child(
+                div()
+                    .px(px(14.))
+                    .pb(px(12.))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(if u.newer { ui::chip("更新あり", p.warn) } else { ui::chip("最新", p.ok) })
+                    .child(div().flex_1().text_size(px(12.5)).text_color(p.sub).child(status))
+                    .child(ui::button(
+                        "app-update-open",
+                        "リリースページ",
+                        Some("external-link"),
+                        if u.newer { Btn::Primary } else { Btn::Glass },
+                        cx,
+                        move |_, _, cx| cx.open_url(&url),
+                    )),
+            );
+        }
+        let app_update = ui::card_titled("アプリの更新", "download", None).child(upd_body);
+
         let about = ui::card_titled("このアプリについて", "info", None).child(
             ui::body()
                 .pb(px(14.))
@@ -307,6 +405,8 @@ impl Shell {
                         look.into_any_element(),
                         backend.into_any_element(),
                         fw.into_any_element(),
+                        resident_card.into_any_element(),
+                        app_update.into_any_element(),
                         about.into_any_element(),
                     ])),
             )

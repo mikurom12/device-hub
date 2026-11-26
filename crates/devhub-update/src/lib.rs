@@ -9,6 +9,9 @@
 use devhub_core::model::FirmwareFeed;
 use std::time::Duration;
 
+pub mod app;
+pub use app::{check_app, AppUpdate};
+
 const TIMEOUT: Duration = Duration::from_secs(5);
 const SPARKLINK_API: &str = "https://api.sparklinkplayjoy.com/api/v1/getKeyboardFirmware";
 // hub.xsyd.top の同梱 SDK が送る公開キー (firmware 参照のみに使われる)。
@@ -65,7 +68,7 @@ pub fn check(
 
 /// `a.b.c` 形式の版比較 — `dist > cur` のときだけ true。
 /// 両方とも数値の点列に parse できなければ比較不能 → 新しいとは扱わない。
-fn version_newer(dist: &str, cur: &str) -> bool {
+pub fn version_newer(dist: &str, cur: &str) -> bool {
     fn parse(s: &str) -> Option<Vec<u32>> {
         s.trim_start_matches(['v', 'V'])
             .split('.')

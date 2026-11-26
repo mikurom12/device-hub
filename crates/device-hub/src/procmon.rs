@@ -23,7 +23,7 @@ use gpui_kit::prelude::*;
 
 /// 前面ウィンドウの exe 名 (小文字・拡張子つき)。
 #[cfg(windows)]
-pub fn foreground_app() -> Option<String> {
+pub fn foreground_app_path() -> Option<String> {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{
         OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
@@ -54,11 +54,19 @@ pub fn foreground_app() -> Option<String> {
         if !ok || len == 0 {
             return None;
         }
-        String::from_utf16_lossy(&buf[..len as usize])
-            .rsplit(['\\', '/'])
-            .next()
-            .map(|s| s.to_lowercase())
+        Some(String::from_utf16_lossy(&buf[..len as usize]).to_lowercase())
     }
+}
+
+/// 前面ウィンドウの exe 名 (小文字・拡張子つき)。
+#[cfg(windows)]
+pub fn foreground_app() -> Option<String> {
+    foreground_app_path().and_then(|p| p.rsplit(['\\', '/']).next().map(str::to_string))
+}
+
+#[cfg(not(windows))]
+pub fn foreground_app_path() -> Option<String> {
+    None
 }
 
 #[cfg(not(windows))]
@@ -127,11 +135,7 @@ pub fn running_apps() -> Vec<(String, String)> {
             if !ok || len == 0 {
                 continue;
             }
-            let exe = String::from_utf16_lossy(&buf[..len as usize])
-                .rsplit(['\\', '/'])
-                .next()
-                .unwrap_or_default()
-                .to_lowercase();
+            let exe = String::from_utf16_lossy(&buf[..len as usize]).to_lowercase();
             if exe.is_empty() {
                 continue;
             }
@@ -140,7 +144,7 @@ pub fn running_apps() -> Vec<(String, String)> {
                 *e = title;
             }
         }
-        let fg = foreground_app().unwrap_or_default();
+        let fg = foreground_app_path().unwrap_or_default();
         let mut v: Vec<(String, String)> = map.into_iter().collect();
         v.sort_by(|a, b| (b.0 == fg).cmp(&(a.0 == fg)).then_with(|| a.0.cmp(&b.0)));
         v
@@ -154,8 +158,16 @@ pub fn running_apps() -> Vec<(String, String)> {
 
 /// exe 名がルールの process に一致するか (小文字・部分一致)。
 fn rule_matches(rule: &ProcRule, fg: &str) -> bool {
-    let pat = rule.process.trim().to_lowercase();
-    !pat.is_empty() && fg.contains(&pat)
+    let pat = rule.process.trim().to_lowercase().replace('/', "\\");
+    if pat.is_empty() {
+        return false;
+    }
+    let fg = fg.to_lowercase().replace('/', "\\");
+    if pat.contains('\\') {
+        fg == pat || fg.ends_with(&pat) || fg.contains(&pat)
+    } else {
+        fg.rsplit('\\').next().unwrap_or(&fg).contains(&pat)
+    }
 }
 
 /// ルールの識別キー (index ではなく内容で持つ — 削除/並び替えに強い)。
@@ -430,7 +442,7 @@ impl Shell {
             self.proc_fg = None;
             return;
         }
-        let fg = foreground_app().filter(|s| !s.is_empty());
+        let fg = foreground_app_path().filter(|s| !s.is_empty());
         if fg != self.proc_fg {
             self.proc_fg = fg;
             return;
@@ -508,6 +520,18 @@ mod tests {
         assert!(!rule_matches(&rule("valorant"), "chrome.exe"));
         assert!(!rule_matches(&rule("  "), "anything.exe"));
         assert!(!rule_matches(&rule(""), ""));
+        assert!(rule_matches(
+            &rule("C:/Games/valorant-win64-shipping.exe"),
+            "c:/games/valorant-win64-shipping.exe"
+        ));
+        assert!(rule_matches(
+            &rule("games/valorant"),
+            "c:/games/valorant-win64-shipping.exe"
+        ));
+        assert!(!rule_matches(
+            &rule("games/valorant"),
+            "c:/other/valorant-win64-shipping.exe"
+        ));
     }
 
     #[test]

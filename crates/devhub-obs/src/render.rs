@@ -299,8 +299,8 @@ impl Pix {
         if oa <= 0. {
             return;
         }
-        for k in 0..3 {
-            let s = c[k] as f32;
+        for (k, &src) in c.iter().take(3).enumerate() {
+            let s = src as f32;
             let d = self.buf[i + k] as f32;
             self.buf[i + k] = ((s * a + d * da * (1. - a)) / oa).round().clamp(0., 255.) as u8;
         }
@@ -329,6 +329,7 @@ impl Pix {
     }
 
     /// 上→下グラデーションの角丸矩形。
+    #[allow(clippy::too_many_arguments)]
     fn rrect_grad(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, top: Rgba, bot: Rgba) {
         self.shade(x - 1., y - 1., w + 2., h + 2., |px, py| {
             let t = ((py - y) / h.max(1.)).clamp(0., 1.);
@@ -340,6 +341,7 @@ impl Pix {
     }
 
     /// 角丸の輪郭線 (AA、太さ t)。
+    #[allow(clippy::too_many_arguments)]
     fn rrect_stroke(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, t: f32, c: Rgba) {
         self.shade(x - 1., y - 1., w + 2., h + 2., |px, py| {
             let d = sd_rrect(
@@ -356,6 +358,7 @@ impl Pix {
     }
 
     /// 柔らかい発光 (外側にフェード)。
+    #[allow(clippy::too_many_arguments)]
     fn glow(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, spread: f32, c: Rgba) {
         self.shade(
             x - spread,
@@ -472,12 +475,12 @@ impl Pix {
 // ---------------- フォント
 
 type Glyph = std::sync::Arc<(fontdue::Metrics, Vec<u8>)>;
+type GlyphCache = std::collections::HashMap<(usize, char, u32), Glyph>;
 
 /// ラスタライズ済みグリフのキャッシュ (毎フレームのラスタライズを避ける)。
 fn glyph(f: &fontdue::Font, ch: char, px: f32) -> Glyph {
     use std::collections::HashMap;
-    static CACHE: std::sync::Mutex<Option<HashMap<(usize, char, u32), Glyph>>> =
-        std::sync::Mutex::new(None);
+    static CACHE: std::sync::Mutex<Option<GlyphCache>> = std::sync::Mutex::new(None);
     let key = (f as *const _ as usize, ch, (px * 4.).round() as u32);
     let mut g = CACHE.lock().unwrap_or_else(|p| p.into_inner());
     let map = g.get_or_insert_with(HashMap::new);

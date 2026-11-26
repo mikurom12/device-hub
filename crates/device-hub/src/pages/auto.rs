@@ -234,7 +234,7 @@ impl Shell {
     pub fn page_auto(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = theme::pal();
         let devs = dev_list(self);
-        let fg_now = procmon::foreground_app().unwrap_or_else(|| "(不明)".into());
+        let fg_now = procmon::foreground_app_path().unwrap_or_else(|| "(不明)".into());
         let running = procmon::running_apps();
         let running_set: std::collections::HashSet<String> =
             running.iter().map(|(e, _)| e.clone()).collect();
@@ -641,7 +641,7 @@ impl Shell {
         let proc_in = self.input(
             "auto-proc-name",
             "",
-            "exe 名 (例: valorant-win64-shipping / 部分一致可)",
+            "exe 名またはパス (例: valorant-win64-shipping / C:/games/...)",
             window,
             cx,
         );
@@ -662,7 +662,7 @@ impl Shell {
         rule_body = rule_body
             .child(ui::row(
                 "監視するプロセス",
-                Some("実行中のアプリから選ぶか、exe 名を直接入力 (部分一致)"),
+                Some("実行中のアプリから選ぶか、exe 名/パスを直接入力。EEPROM 寿命を守るため 2 回確認した安定した切替だけ書き込みます"),
                 div()
                     .flex()
                     .items_center()
@@ -691,7 +691,7 @@ impl Shell {
                         Btn::Ghost,
                         cx,
                         move |this, w, cx| {
-                            if let Some(exe) = procmon::foreground_app() {
+                            if let Some(exe) = procmon::foreground_app_path() {
                                 this.set_input("auto-proc-name", &exe, w, cx);
                             } else {
                                 this.toast("前面アプリを取得できません", true, cx);

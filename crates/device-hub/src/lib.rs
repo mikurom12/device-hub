@@ -10,6 +10,7 @@
 //! - `theme` / `wallpaper` / `prefs` / `keycode`
 
 pub mod app;
+pub mod appupdate;
 pub mod atomic;
 pub mod audio;
 pub mod cursor;
@@ -24,6 +25,7 @@ pub mod palette;
 pub mod prefs;
 pub mod presets;
 pub mod procmon;
+pub mod resident;
 pub use devhub_obs::rawinput;
 pub mod store;
 pub mod theme;

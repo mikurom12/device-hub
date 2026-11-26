@@ -137,6 +137,7 @@ mod imp {
         seg: Seg,
         /// 確定した区間 (新しい順に末尾)。
         segs: VecDeque<Seg>,
+        buttons: u8,
     }
 
     impl Dev {
@@ -148,6 +149,7 @@ mod imp {
                 buckets: VecDeque::new(),
                 seg: Seg::default(),
                 segs: VecDeque::new(),
+                buttons: 0,
             }
         }
 
@@ -353,24 +355,50 @@ mod imp {
         static RAW_BUF: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
     }
 
-    /// 1 レコードから (hDevice, マウス移動量 |dx|+|dy|)。
+    /// 1 レコードから (hDevice, マウス移動量 |dx|+|dy|, ボタン遷移フラグ)。
     /// キーボード等マウス以外は counts=None (区間・移動量の対象外)。
-    fn read_raw(raw: &RAWINPUT) -> (usize, Option<u32>) {
+    fn read_raw(raw: &RAWINPUT) -> (usize, Option<u32>, u32) {
         let hdev = raw.header.hDevice as usize;
-        let counts = if raw.header.dwType == RIM_TYPEMOUSE {
+        if raw.header.dwType == RIM_TYPEMOUSE {
             let m = unsafe { raw.data.mouse };
-            Some(
+            let counts = Some(
                 m.lLastX
                     .unsigned_abs()
                     .saturating_add(m.lLastY.unsigned_abs()),
-            )
+            );
+            (hdev, counts, unsafe { m.Anonymous.ulButtons })
         } else {
-            None
-        };
-        (hdev, counts)
+            (hdev, None, 0)
+        }
     }
 
-    fn push(m: &mut Meter, hdev: usize, counts: Option<u32>, now: Instant) {
+    fn apply_button_flags(bits: &mut u8, flags: u32) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_1_UP, RI_MOUSE_BUTTON_2_DOWN,
+            RI_MOUSE_BUTTON_2_UP, RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_3_UP,
+            RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_4_UP, RI_MOUSE_BUTTON_5_DOWN,
+            RI_MOUSE_BUTTON_5_UP,
+        };
+        for (down, up, bit) in [
+            (RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_1_UP, 0),
+            (RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_2_UP, 1),
+            (RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_3_UP, 2),
+            (RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_4_UP, 3),
+            (RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP, 4),
+        ] {
+            if flags & down != 0 {
+                *bits |= 1 << bit;
+            }
+            if flags & up != 0 {
+                *bits &= !(1 << bit);
+            }
+        }
+    }
+
+    fn push(m: &mut Meter, hdev: usize, counts: Option<u32>, button_flags: u32, now: Instant) {
+        if button_flags != 0 {
+            apply_button_flags(&mut m.devs.entry(hdev).or_insert_with(Dev::new).buttons, button_flags);
+        }
         if let Some(trial) = m.trial.as_mut() {
             if counts.is_some() && (trial.start..trial.end).contains(&now) {
                 let us = (now - trial.start).as_micros() as u64;
@@ -408,8 +436,8 @@ mod imp {
                 );
                 if got != u32::MAX && got as usize >= size_of::<RAWINPUTHEADER>() {
                     let mut meter = METER.lock().unwrap_or_else(|p| p.into_inner());
-                    let (hdev, counts) = read_raw(&*(buf.as_ptr() as *const RAWINPUT));
-                    push(&mut meter, hdev, counts, now);
+                    let (hdev, counts, buttons) = read_raw(&*(buf.as_ptr() as *const RAWINPUT));
+                    push(&mut meter, hdev, counts, buttons, now);
                 }
                 // 2) キューに溜まった残りをまとめてドレイン (高周波向け公式手順)。
                 loop {
@@ -435,8 +463,8 @@ mod imp {
                     let mut meter = METER.lock().unwrap_or_else(|p| p.into_inner());
                     for _ in 0..n {
                         let raw = &*p;
-                        let (hdev, counts) = read_raw(raw);
-                        push(&mut meter, hdev, counts, now);
+                        let (hdev, counts, buttons) = read_raw(raw);
+                        push(&mut meter, hdev, counts, buttons, now);
                         // NEXTRAWINPUTBLOCK 相当: header.dwSize をポインタ境界に揃えて進む。
                         let adv = (raw.header.dwSize as usize + size_of::<usize>() - 1)
                             & !(size_of::<usize>() - 1);
@@ -473,6 +501,34 @@ mod imp {
                 })
             };
             Some((hex("VID_")?, hex("PID_")?))
+        }
+    }
+
+    pub fn mouse_buttons(vid: u16, pid: u16) -> Option<u8> {
+        let mut m = METER.lock().unwrap_or_else(|p| p.into_inner());
+        let mut out = None;
+        for (&hdev, d) in m.devs.iter_mut() {
+            let vp = match d.vidpid {
+                Some(v) => v,
+                None => {
+                    let v = vidpid_of(hdev);
+                    d.vidpid = Some(v);
+                    v
+                }
+            };
+            if vp == Some((vid, pid)) {
+                out = Some(out.unwrap_or(0) | d.buttons);
+            }
+        }
+        out
+    }
+
+    pub fn any_mouse_buttons() -> Option<u8> {
+        let m = METER.lock().unwrap_or_else(|p| p.into_inner());
+        if m.devs.is_empty() {
+            None
+        } else {
+            Some(m.devs.values().fold(0u8, |a, d| a | d.buttons))
         }
     }
 
@@ -615,14 +671,29 @@ mod imp {
                     devs: HashMap::new(),
                 }),
             };
-            push(&mut meter, 1, Some(2), start - Duration::from_millis(1));
-            push(&mut meter, 1, Some(2), start);
-            push(&mut meter, 2, None, start);
-            push(&mut meter, 1, Some(2), end);
+            push(&mut meter, 1, Some(2), 0, start - Duration::from_millis(1));
+            push(&mut meter, 1, Some(2), 0, start);
+            push(&mut meter, 2, None, 0, start);
+            push(&mut meter, 1, Some(2), 0, end);
             let trial = meter.trial.unwrap();
             assert_eq!(trial.devs.len(), 1);
             assert_eq!(trial.devs[&1].events, [0]);
             assert_eq!(meter.devs[&1].seg.n, 1);
+        }
+
+        #[test]
+        fn raw_button_flags_update_bits() {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_1_UP, RI_MOUSE_BUTTON_4_DOWN,
+                RI_MOUSE_BUTTON_4_UP,
+            };
+            let mut bits = 0;
+            apply_button_flags(&mut bits, RI_MOUSE_BUTTON_1_DOWN | RI_MOUSE_BUTTON_4_DOWN);
+            assert_eq!(bits, 0b1001);
+            apply_button_flags(&mut bits, RI_MOUSE_BUTTON_1_UP);
+            assert_eq!(bits, 0b1000);
+            apply_button_flags(&mut bits, RI_MOUSE_BUTTON_4_UP);
+            assert_eq!(bits, 0);
         }
 
         #[test]
@@ -667,7 +738,7 @@ mod imp {
 }
 
 #[cfg(windows)]
-pub use imp::{begin_trial, finish_trial, start, start_mouse, stats};
+pub use imp::{any_mouse_buttons, begin_trial, finish_trial, mouse_buttons, start, start_mouse, stats};
 
 #[cfg(not(windows))]
 mod stub {
@@ -681,7 +752,13 @@ mod stub {
     pub fn stats(_vid: u16, _pid: u16) -> Option<PollStats> {
         None
     }
+    pub fn mouse_buttons(_vid: u16, _pid: u16) -> Option<u8> {
+        None
+    }
+    pub fn any_mouse_buttons() -> Option<u8> {
+        None
+    }
 }
 
 #[cfg(not(windows))]
-pub use stub::{begin_trial, finish_trial, start, start_mouse, stats};
+pub use stub::{any_mouse_buttons, begin_trial, finish_trial, mouse_buttons, start, start_mouse, stats};

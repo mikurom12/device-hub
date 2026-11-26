@@ -93,6 +93,15 @@ pub fn action_label(a: &ButtonAction, macros: &[Option<MacroDef>]) -> String {
     }
 }
 
+pub(crate) fn physical_button_mask(this: &Shell) -> u8 {
+    let Some(s) = this.cur() else {
+        return 0;
+    };
+    crate::rawinput::mouse_buttons(s.info.vid, s.info.pid)
+        .or_else(crate::rawinput::any_mouse_buttons)
+        .unwrap_or(0)
+}
+
 impl Shell {
     // ================================================================== DPI
 
@@ -600,6 +609,9 @@ impl Shell {
             return div().into_any_element();
         };
         let hover_slot = (0..mc.buttons.len()).find(|i| motion::hovered(&format!("btnrow:{i}")));
+        let phys_mask = physical_button_mask(self);
+        let phys_down = |i: usize| i < 5 && phys_mask & (1 << i) != 0;
+        let hot_slot = |i: usize| hover_slot == Some(i) || phys_down(i);
 
         // マウスの図。
         let mark = |n: usize, x: f32, y: f32, hot: bool| {
@@ -694,7 +706,7 @@ impl Shell {
                     .bg(theme::alpha(p.fg, 0.3)),
             );
         for (i, (x, y)) in positions.iter().enumerate().take(mc.buttons.len()) {
-            figure = figure.child(mark(i, *x, *y, hover_slot == Some(i)));
+            figure = figure.child(mark(i, *x, *y, hot_slot(i)));
         }
 
         let mut list = ui::body().pt(px(4.));
@@ -711,6 +723,30 @@ impl Shell {
             );
             let key = format!("btnrow:{i}");
             let a2 = a.clone();
+            let pressed = phys_down(i);
+            let hovered = hover_slot == Some(i);
+            let graphite = theme::is_graphite();
+            let row_bg = if pressed {
+                if graphite { p.inv } else { theme::alpha(p.accent, 0.16) }
+            } else if hovered {
+                p.ctrl
+            } else {
+                theme::alpha(p.ctrl, 0.)
+            };
+            let row_edge = if pressed {
+                if graphite { theme::alpha(p.edge, 0.) } else { theme::alpha(p.accent, 0.5) }
+            } else {
+                theme::alpha(p.hair, 0.)
+            };
+            let inv_text = pressed && graphite;
+            let fg_now = if inv_text { p.inv_fg } else { p.fg };
+            let sub_now = if inv_text {
+                theme::alpha(p.inv_fg, 0.68)
+            } else if changed {
+                p.accent
+            } else {
+                p.sub
+            };
             list = list.child(
                 div()
                     .id(SharedString::from(format!("btn-slot-{i}")))
@@ -723,7 +759,9 @@ impl Shell {
                     .my(px(2.))
                     .rounded(px(14.))
                     .cursor_pointer()
-                    .hover(|s| s.bg(p.ctrl))
+                    .bg(row_bg)
+                    .border_1()
+                    .border_color(row_edge)
                     .child(motion::track(key))
                     .child(
                         div()
@@ -734,15 +772,15 @@ impl Shell {
                             .justify_center()
                             .text_size(px(11.))
                             .font_weight(FontWeight::BOLD)
-                            .bg(if hover_slot == Some(i) {
+                            .bg(if hot_slot(i) {
                                 p.accent
                             } else {
                                 p.ctrl_hover
                             })
-                            .text_color(if hover_slot == Some(i) {
+                            .text_color(if hot_slot(i) {
                                 p.on_accent
                             } else {
-                                p.fg
+                                fg_now
                             })
                             .child(format!("{}", i + 1)),
                     )
@@ -755,16 +793,17 @@ impl Shell {
                                 div()
                                     .text_size(px(13.))
                                     .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(fg_now)
                                     .child(slot.name.clone()),
                             )
                             .child(
                                 div()
                                     .text_size(px(12.))
-                                    .text_color(if changed { p.accent } else { p.sub })
+                                    .text_color(sub_now)
                                     .child(label),
                             ),
                     )
-                    .child(ui::icon("chevron-right", 15., p.faint))
+                    .child(ui::icon("chevron-right", 15., if inv_text { theme::alpha(p.inv_fg, 0.6) } else { p.faint }))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.modal = Some(Modal::Button {
                             slot: i,
