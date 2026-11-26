@@ -28,11 +28,14 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let mut set: Option<u8> = None;
     let mut host = false;
+    let mut try_all = false;
     while let Some(a) = args.next() {
         if a == "--set" {
             set = args.next().and_then(|v| v.parse().ok());
         } else if a == "--host" {
             host = true;
+        } else if a == "--try" {
+            try_all = true;
         }
     }
     let api = HidApi::new().expect("hidapi init");
@@ -70,6 +73,47 @@ fn main() {
         }
         show(&mut s, "f1 rate list []", 1, &[]);
         show(&mut s, "f2 current []", 2, &[]);
+        if try_all {
+            // 引数の形を変えながら f3 を書き、f2 が変わるかを見る (500Hz=2 を狙う。変われば止まる)
+            let read = |s: &mut Session<HidIo>, p: &[u8]| s.call(F, 2, p).map(|r| r[0]).ok();
+            let base = read(&mut s, &[]);
+            println!("baseline f2 = {base:?}");
+            let shapes: Vec<(&str, Vec<u8>)> = vec![
+                ("[idx]", vec![2]),
+                ("[0,idx]", vec![0, 2]),
+                ("[1,idx]", vec![1, 2]),
+                ("[2,idx]", vec![2, 2]),
+                ("[3,idx]", vec![3, 2]),
+                ("[idx,0]", vec![2, 0]),
+                ("[idx,1]", vec![2, 1]),
+                ("[0,0,idx]", vec![0, 0, 2]),
+            ];
+            let mut hit = None;
+            for (name, p) in &shapes {
+                let r = s.call(F, 3, p);
+                std::thread::sleep(Duration::from_millis(400));
+                let now = read(&mut s, &[]);
+                let now0 = read(&mut s, &[0]);
+                let now1 = read(&mut s, &[1]);
+                println!("f3 {name:<10} reply={:<6} -> f2={now:?} f2[0]={now0:?} f2[1]={now1:?}",
+                    if r.is_ok() { "ok" } else { "ERR" });
+                if now != base || now0 != base || now1 != base {
+                    println!("★ 変化あり: {name}");
+                    hit = Some(p.clone());
+                    break;
+                }
+            }
+            if let Some(mut p) = hit {
+                // 同じ形で 1000Hz(=3) に戻す
+                if let Some(x) = p.iter_mut().find(|x| **x == 2) { *x = 3; }
+                let _ = s.call(F, 3, &p);
+                std::thread::sleep(Duration::from_millis(400));
+                println!("復元後 f2 = {:?}", read(&mut s, &[]));
+            } else {
+                println!("どの形でも変化なし (現在値は元のまま)");
+            }
+            continue;
+        }
         let orig_mode = onboard_mode(&mut s);
         println!("onboard mode (現在)          -> {orig_mode:?}");
         if let Some(i) = set {
