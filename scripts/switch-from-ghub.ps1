@@ -28,7 +28,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Exe = (Join-Path $PSScriptRoot '..\target\release\device-hub.exe'),
+    [string]$Exe = '',
     [switch]$Apply,
     [switch]$SkipUninstall,
     [switch]$BackupData,
@@ -36,6 +36,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# $PSScriptRoot は param() の既定値の中では空になることがあるので、ここで決める。
+if (-not $Exe) {
+    $here = $PSScriptRoot
+    if (-not $here) { $here = Split-Path -Parent $MyInvocation.MyCommand.Path }
+    if (-not $here) { $here = (Get-Location).Path }
+    $Exe = Join-Path $here '..\target\release\device-hub.exe'
+}
 
 function Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 function Do-Or-Say($desc, [scriptblock]$action) {
