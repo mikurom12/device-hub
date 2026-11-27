@@ -1049,6 +1049,16 @@ fn worker(
             }
         }
         for job in kept {
+            // 無線機は寝る/有線に切り替わると Disconnected でドライバを捨てる。復帰しても
+            // 列挙のパスは変わらず Job::Open が来ないので、操作が来た時点で開き直す
+            // (開き直すと再接続時の設定復元も走る)。失敗したら従来どおりエラーを返す。
+            if driver.is_none() && !matches!(&job, Job::Open) {
+                if let Ok(d) = backend.driver(&id) {
+                    let info = d.info();
+                    vidpid = Some((info.vid, info.pid));
+                    driver = Some(d);
+                }
+            }
             let ok = match job {
                 Job::Open => match backend.driver(&id) {
                     Ok(d) => {
