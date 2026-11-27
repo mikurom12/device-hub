@@ -181,6 +181,19 @@ impl<I: Io> LogitechDriver<I> {
         let _ = std::fs::write(path, v.to_string());
     }
 
+    /// DPI / ポーリングの書込みはホストモードでしか受理されない (実機: オンボードのままだと
+    /// DPI は LogitechError、ポーリングは InvalidArgument で拒否される)。再接続や有線⇔無線の
+    /// 切替でマウスがオンボードに戻るので、書く前に毎回確認して必要ならホストへ切り替える。
+    fn ensure_host(&self) {
+        if !self.has_onboard {
+            return;
+        }
+        if let Ok(OnboardMode::Onboard) = self.with(|s| f::onboard_mode(s)) {
+            let _ = self.with(|s| f::set_onboard_mode(s, OnboardMode::Host));
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
     fn restore_saved(&self) {
         let Some(path) = &self.state_file else { return };
         let Some(v) = std::fs::read_to_string(path)
@@ -190,6 +203,7 @@ impl<I: Io> LogitechDriver<I> {
             return;
         };
         // 失敗は無視 (機器が寝ている等)。次の apply か再接続で再試行される。
+        self.ensure_host();
         if let Some(d) = v["dpi"].as_u64() {
             let d = self.dpi.snap(d.min(u16::MAX as u64) as u16);
             let _ = self.with(|s| f::set_dpi(s, 0, d));
@@ -321,6 +335,7 @@ impl<I: Io + 'static> DeviceDriver for LogitechDriver<I> {
                     .x
                     .min(u16::MAX as u32) as u16;
                 let dpi = self.dpi.snap(want);
+                self.ensure_host();
                 self.with(|s| f::set_dpi(s, 0, dpi))?;
                 // 受理されたか読み戻す。オンボードモードだと無視される機器があるため、
                 // 黙って失敗させずトーストで知らせる。
@@ -344,6 +359,7 @@ impl<I: Io + 'static> DeviceDriver for LogitechDriver<I> {
                 if !self.rates.contains(&hz) {
                     return Err(HubError::Invalid(format!("{hz} Hz is not supported")));
                 }
+                self.ensure_host();
                 self.with(|s| f::set_report_rate(s, hz))?;
                 let got = self.confirm(hz, |s| f::report_rate(s))?;
                 if got != hz {
@@ -428,7 +444,7 @@ mod tests {
                 (3, 1) => Some(vec![0, 0x00, 0x64, 0xE0, 0x32, 0xAB, 0xE0, 0, 0]),
                 (3, 2) => Some(vec![0, (st.0 >> 8) as u8, st.0 as u8, 0x03, 0x20]),
                 (3, 3) => {
-                    if accept_dpi {
+                    if accept_dpi && st.2 == 2 {
                         st.0 = u16::from_be_bytes([p[1], p[2]]);
                     }
                     Some(vec![])
@@ -436,7 +452,9 @@ mod tests {
                 (4, 1) => Some(vec![0x00, 0x7F]),
                 (4, 2) => Some(vec![st.1]),
                 (4, 3) => {
-                    st.1 = p[0];
+                    if st.2 == 2 {
+                        st.1 = p[0];
+                    }
                     Some(vec![])
                 }
                 (5, 2) => Some(vec![st.2]),
