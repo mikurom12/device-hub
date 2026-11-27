@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Logicool G HUB から Device HUB へ切り替える (常駐の登録 → G HUB の停止・アンインストール)。
 
