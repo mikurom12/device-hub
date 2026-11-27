@@ -427,12 +427,12 @@ pub fn report_rates<I: Io>(s: &mut Session<I>) -> Result<Vec<u32>> {
     Ok(v)
 }
 
-pub fn report_rate<I: Io>(s: &mut Session<I>) -> Result<u32> {
+/// 現在のポーリングレート (Hz)。`conn` は 0x8061 の接続種別の枠で、実機 (PRO 2) では
+/// 有線=0 / 2.4GHz 受信機=1。書込み (f3 [idx]) は今つながっている接続の枠にだけ反映され、
+/// 他の枠は 1000Hz のまま動かないので、必ず接続に合う枠を読む。
+pub fn report_rate<I: Io>(s: &mut Session<I>, conn: u8) -> Result<u32> {
     if s.has(EXTENDED_REPORT_RATE)? {
-        // 実機 (PRO 2 + 2.4GHz 受信機) では f2 が接続種別ごとの枠を持ち、書込み (f3 [idx]) が
-        // 反映されるのは conn=1 の枠だけだった。引数なし / conn=0 は常に 1000Hz のまま。
-        // そのため conn=1 を最優先で読み、読めなければ引数なしにフォールバックする。
-        let p = match s.call(EXTENDED_REPORT_RATE, 2, &[1]) {
+        let p = match s.call(EXTENDED_REPORT_RATE, 2, &[conn]) {
             Ok(p) => p,
             Err(_) => s.call(EXTENDED_REPORT_RATE, 2, &[])?,
         };
@@ -641,7 +641,7 @@ mod tests {
             report_rates(&mut s).unwrap(),
             vec![125, 250, 500, 1000, 2000, 4000, 8000]
         );
-        assert_eq!(report_rate(&mut s).unwrap(), 1000);
+        assert_eq!(report_rate(&mut s, 1).unwrap(), 1000);
         set_report_rate(&mut s, 8000).unwrap();
         assert!(set_report_rate(&mut s, 3000).is_err());
     }
@@ -657,7 +657,22 @@ mod tests {
             },
             _ => None,
         });
-        assert_eq!(report_rate(&mut s).unwrap(), 500);
+        assert_eq!(report_rate(&mut s, 1).unwrap(), 500);
+        assert_eq!(report_rate(&mut s, 0).unwrap(), 1000);
+    }
+
+    #[test]
+    fn report_rate_wired_reads_conn0_slot() {
+        // 実機 (有線): 書込みは conn=0 の枠に反映され、conn=1 は 1000Hz のまま
+        let mut s = device(&[(EXTENDED_REPORT_RATE, 6)], |_, func, p| match func {
+            2 => match p.first() {
+                Some(1) => Some(vec![3]),
+                Some(2) | Some(3) => None,
+                _ => Some(vec![2]),
+            },
+            _ => None,
+        });
+        assert_eq!(report_rate(&mut s, 0).unwrap(), 500);
     }
 
     #[test]
@@ -672,7 +687,7 @@ mod tests {
             _ => None,
         });
         assert_eq!(report_rates(&mut s).unwrap(), vec![250, 500, 1000]);
-        assert_eq!(report_rate(&mut s).unwrap(), 500);
+        assert_eq!(report_rate(&mut s, 1).unwrap(), 500);
         set_report_rate(&mut s, 250).unwrap();
     }
 

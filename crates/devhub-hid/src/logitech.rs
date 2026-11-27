@@ -72,6 +72,8 @@ pub struct LogitechDriver<I: Io> {
     dpi: DpiList,
     rates: Vec<u32>,
     has_onboard: bool,
+    /// 0x8061 の接続種別の枠 (有線=0, 2.4GHz=1)。読み戻しはこの枠を見る。
+    rate_conn: u8,
     /// 直近に適用した値の保存先 (再接続時に再適用する)。テストでは None。
     state_file: Option<PathBuf>,
 }
@@ -130,6 +132,7 @@ impl<I: Io> LogitechDriver<I> {
         let has_onboard = s.has(f::ONBOARD_PROFILES).unwrap_or(false);
 
         let caps = build_caps(&dpi, &rates, has_onboard, info.battery.is_some());
+        let rate_conn = if info.transport == Transport::Wired { 0 } else { 1 };
         let drv = Self {
             info: Mutex::new(info),
             sess: Mutex::new(s),
@@ -137,6 +140,7 @@ impl<I: Io> LogitechDriver<I> {
             dpi,
             rates,
             has_onboard,
+            rate_conn,
             state_file,
         };
         drv.restore_saved();
@@ -294,7 +298,7 @@ impl<I: Io + 'static> DeviceDriver for LogitechDriver<I> {
         let dpi = self.with(|s| f::get_dpi(s, 0))?;
         let mut settings = BTreeMap::new();
         if self.caps.setting(ID_POLLING).is_some() {
-            if let Ok(hz) = self.with(|s| f::report_rate(s)) {
+            if let Ok(hz) = self.with(|s| f::report_rate(s, self.rate_conn)) {
                 settings.insert(ID_POLLING.into(), SettingValue::Choice(hz as i64));
             }
         }
@@ -361,7 +365,7 @@ impl<I: Io + 'static> DeviceDriver for LogitechDriver<I> {
                 }
                 self.ensure_host();
                 self.with(|s| f::set_report_rate(s, hz))?;
-                let got = self.confirm(hz, |s| f::report_rate(s))?;
+                let got = self.confirm(hz, |s| f::report_rate(s, self.rate_conn))?;
                 if got != hz {
                     return Err(HubError::Protocol(format!(
                         "ポーリングレートが反映されません (要求 {hz} / 実際 {got})。\

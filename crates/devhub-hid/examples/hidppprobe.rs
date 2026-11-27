@@ -91,7 +91,7 @@ fn main() {
         println!("dpi list  : {:?}", f::dpi_list(&mut s, 0));
         println!("dpi now   : {:?}", f::get_dpi(&mut s, 0));
         println!("rates     : {:?}", f::report_rates(&mut s));
-        println!("rate now  : {:?}", f::report_rate(&mut s));
+        println!("rate now  : conn0={:?} conn1={:?}", f::report_rate(&mut s, 0), f::report_rate(&mut s, 1));
         println!("onboard   : {:?}", f::onboard_mode(&mut s));
     }
 }
