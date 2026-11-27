@@ -269,26 +269,13 @@ pub const KNOWN: &[KnownDevice] = &[
     // PRO 2 LIGHTSPEED。VID/PID は Linux カーネル hid-logitech-hidpp / hid-logitech-dj の
     // 追加パッチ (2025-08) から: 有線 0xC09A、LIGHTSPEED 受信機 0xC543。
     // HID++ の long report (0x11) を運ぶ vendor 定義コレクションが usage page 0xFF00/usage 2
-    // か 0xFF43/0x0202 かは機種・世代で違う。受信機 (c543) は実機の hidppprobe で FF00/0002 と
-    // 確定 (2026-11-26)。有線 (c09a) は未確認なので両方を候補に載せている。
-    KnownDevice {
-        vid: 0x046D,
-        pid: 0xC09A,
-        usage_page: Some(0xFF00),
-        usage: Some(0x0002),
-        kind: DeviceKind::Mouse,
-        vendor: "Logitech G",
-        model: "pro2-lightspeed",
-        name: "PRO 2 LIGHTSPEED",
-        transport: Transport::Wired,
-        driver: DriverKind::Logitech,
-        verified: false,
-    },
+    // か 0xFF43 系かは機種・世代で違う。実機の hidppprobe で確定 (2026-11-27):
+    // 受信機 (c543) = FF00/0002、有線 (c09a) = FF43/0302 (device index 0xFF, protocol 4.2)。
     KnownDevice {
         vid: 0x046D,
         pid: 0xC09A,
         usage_page: Some(0xFF43),
-        usage: Some(0x0202),
+        usage: Some(0x0302),
         kind: DeviceKind::Mouse,
         vendor: "Logitech G",
         model: "pro2-lightspeed",

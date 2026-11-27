@@ -55,9 +55,9 @@ fn main() {
     let api = HidApi::new().expect("hidapi init");
     for d in api
         .device_list()
-        .filter(|d| d.vendor_id() == 0x046D && d.usage_page() == 0xFF00 && d.usage() == 0x0002)
+        .filter(|d| d.vendor_id() == 0x046D && d.usage_page() >= 0xFF00)
     {
-        println!("== {:04x}:{:04x} up=ff00 u=0002 ==", d.vendor_id(), d.product_id());
+        println!("== {:04x}:{:04x} up={:04x} u={:04x} ==", d.vendor_id(), d.product_id(), d.usage_page(), d.usage());
         let Ok(dev) = api.open_path(d.path()) else {
             println!("open 失敗");
             continue;
